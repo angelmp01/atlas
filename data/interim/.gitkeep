@@ -1,0 +1,2 @@
+# This file ensures the interim data directory is preserved in git
+# Intermediate processing files will be saved here

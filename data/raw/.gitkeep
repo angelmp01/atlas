@@ -1,0 +1,2 @@
+# This file ensures the raw data directory is preserved in git
+# Place your raw data files (CSV, JSON, Excel, etc.) in this directory

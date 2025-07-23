@@ -1,0 +1,2 @@
+# This file ensures the processed data directory is preserved in git
+# Processed CSV files will be saved here by the preprocessing pipeline

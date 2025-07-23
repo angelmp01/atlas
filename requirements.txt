@@ -1,0 +1,10 @@
+# Atlas Project Requirements - Minimum Essential Dependencies
+
+# Core Data Processing
+pandas>=2.0.0
+openpyxl>=3.1.0  # For Excel file support
+
+# Development and Testing (Optional)
+pytest>=7.3.0
+black>=23.0.0  # Code formatting
+flake8>=6.0.0  # Linting
