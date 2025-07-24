@@ -16,8 +16,10 @@ import json
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, date
 import argparse
+import calendar
+import numpy as np
 
 from utils.logger import setup_logger
 from utils.file_handler import FileHandler
@@ -31,7 +33,9 @@ class DataPreprocessor:
     into a standardized format suitable for analytics and processing.
     """
     
-    def __init__(self, input_dir: str, output_dir: str, config_path: Optional[str] = None):
+    def __init__(self, input_dir: str, output_dir: str, config_path: Optional[str] = None, 
+                 target_objectid: Optional[int] = None, distribution_mode: str = "exact", 
+                 random_seed: Optional[int] = None):
         """
         Initialize the DataPreprocessor.
         
@@ -39,10 +43,30 @@ class DataPreprocessor:
             input_dir (str): Path to directory containing raw data files
             output_dir (str): Path to directory where processed CSV will be saved
             config_path (str, optional): Path to configuration file
+            target_objectid (int, optional): Process only this specific OBJECTID for validation
+            distribution_mode (str): Distribution mode for trip generation:
+                - "exact": Generate exactly the average number of trips per day
+                - "poisson": Use Poisson distribution around the average (realistic variability)
+                - "normal": Use truncated normal distribution around the average
+            random_seed (int, optional): Seed for random number generation for reproducibility
         """
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
         self.config_path = config_path
+        self.target_objectid = target_objectid
+        self.distribution_mode = distribution_mode.lower()
+        
+        # Validate distribution mode
+        valid_modes = ["exact", "poisson", "normal"]
+        if self.distribution_mode not in valid_modes:
+            raise ValueError(f"distribution_mode must be one of {valid_modes}, got '{distribution_mode}'")
+        
+        # Set random seed for reproducibility
+        if random_seed is not None:
+            np.random.seed(random_seed)
+            self.logger_info = f"Random seed set to {random_seed}"
+        else:
+            self.logger_info = "No random seed set"
         
         # Ensure directories exist
         self.input_dir.mkdir(parents=True, exist_ok=True)
@@ -58,6 +82,256 @@ class DataPreprocessor:
         self.config = self._load_config() if config_path else self._get_default_config()
         
         self.logger.info(f"DataPreprocessor initialized with input_dir: {self.input_dir}, output_dir: {self.output_dir}")
+        self.logger.info(f"Distribution mode: {self.distribution_mode}")
+        if self.target_objectid:
+            self.logger.info(f"Processing only OBJECTID: {self.target_objectid} (validation mode)")
+    
+    def _generate_trips_for_day(self, average_trips: float) -> int:
+        """
+        Generate number of trips for a day based on distribution mode.
+        
+        Args:
+            average_trips (float): Average number of trips for this day type
+            
+        Returns:
+            int: Actual number of trips to generate
+        """
+        if average_trips <= 0:
+            return 0
+            
+        if self.distribution_mode == "exact":
+            return int(average_trips)
+            
+        elif self.distribution_mode == "poisson":
+            # Poisson distribution is ideal for counting events (trips)
+            return np.random.poisson(average_trips)
+            
+        elif self.distribution_mode == "normal":
+            # Normal distribution with standard deviation = mean/3 (99.7% within reasonable range)
+            std_dev = max(0.5, average_trips / 3)  # Minimum std of 0.5 to avoid too narrow distribution
+            trips = np.random.normal(average_trips, std_dev)
+            return max(0, int(round(trips)))  # Ensure non-negative integer
+            
+        else:
+            # Fallback to exact
+            return int(average_trips)
+    
+    def _generate_cargo_type(self) -> str:
+        """
+        Generate cargo type based on configuration percentages.
+        
+        Returns:
+            str: Either 'normal' or 'refrigerada'
+        """
+        normal_percentage = self.config.get('cargo_types', {}).get('normal_percentage', 70)
+        
+        # Generate random number between 0-100
+        random_value = np.random.uniform(0, 100)
+        
+        if random_value <= normal_percentage:
+            return 'normal'
+        else:
+            return 'refrigerada'
+    
+    def _generate_volume(self) -> int:
+        """
+        Generate random volume in palets based on truck capacity.
+        
+        Returns:
+            int: Number of palets (between min and max capacity)
+        """
+        min_palets = self.config.get('truck_capacity', {}).get('min_palets', 1)
+        max_palets = self.config.get('truck_capacity', {}).get('max_palets', 10)
+        
+        return np.random.randint(min_palets, max_palets + 1)
+    
+    def _generate_weight(self, volumen_palets: int) -> int:
+        """
+        Generate weight based on volume with some variation.
+        
+        Args:
+            volumen_palets (int): Number of palets
+            
+        Returns:
+            int: Weight in kilograms (integer)
+        """
+        min_kg_per_palet = self.config.get('weight_per_palet', {}).get('min_kg', 50)
+        max_kg_per_palet = self.config.get('weight_per_palet', {}).get('max_kg', 800)
+        
+        # Generate weight per palet with variation
+        weight_per_palet = np.random.uniform(min_kg_per_palet, max_kg_per_palet)
+        total_weight = weight_per_palet * volumen_palets
+        
+        # Return as integer
+        return int(round(total_weight))
+    
+    def _generate_price(self, shape_length: float) -> int:
+        """
+        Generate price based on route distance with variation.
+        
+        Args:
+            shape_length (float): Route distance in meters
+            
+        Returns:
+            int: Price in euros (integer)
+        """
+        if shape_length is None or shape_length <= 0:
+            shape_length = 50000  # Default 50km if no distance available
+        
+        # Convert meters to kilometers
+        distance_km = shape_length / 1000
+        
+        # Get pricing configuration
+        base_price_per_km = self.config.get('pricing', {}).get('base_price_per_km', 1.2)
+        variation_percent = self.config.get('pricing', {}).get('price_variation_percent', 20)
+        
+        # Calculate base price
+        base_price = distance_km * base_price_per_km
+        
+        # Add variation (±20% by default)
+        variation_factor = np.random.uniform(
+            1 - (variation_percent / 100), 
+            1 + (variation_percent / 100)
+        )
+        
+        final_price = base_price * variation_factor
+        
+        # Return as integer
+        return int(round(final_price))
+    
+    def _generate_2024_dates(self) -> List[Dict[str, Any]]:
+        """
+        Generate all dates for 2024 with their corresponding day of week.
+        
+        Returns:
+            List[Dict]: List of dictionaries with date and day_name
+        """
+        dates_2024 = []
+        start_date = date(2024, 1, 1)
+        end_date = date(2024, 12, 31)
+        
+        current_date = start_date
+        while current_date <= end_date:
+            day_name = calendar.day_name[current_date.weekday()]
+            # Map to Spanish day names as used in the JSON
+            day_mapping = {
+                'Monday': 'Lunes',
+                'Tuesday': 'Martes', 
+                'Wednesday': 'Miercoles',
+                'Thursday': 'Jueves',
+                'Friday': 'Viernes',
+                'Saturday': 'Sabado',
+                'Sunday': 'Domingo'
+            }
+            
+            dates_2024.append({
+                'date': current_date,
+                'day_name_spanish': day_mapping[day_name],
+                'day_name_english': day_name
+            })
+            
+            # Move to next day
+            if current_date.month == 12 and current_date.day == 31:
+                break
+            elif current_date.day == calendar.monthrange(current_date.year, current_date.month)[1]:
+                current_date = current_date.replace(month=current_date.month + 1, day=1)
+            else:
+                current_date = current_date.replace(day=current_date.day + 1)
+        
+        return dates_2024
+    
+    def _expand_feature_to_trips(self, feature: Dict[str, Any], dates_2024: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Expand a single feature into individual trip records for 2024.
+        
+        Args:
+            feature (Dict): Feature from JSON with attributes and geometry
+            dates_2024 (List): List of all 2024 dates with day names
+            
+        Returns:
+            List[Dict]: List of individual trip records
+        """
+        attributes = feature.get('attributes', {})
+        geometry = feature.get('geometry', {})
+        
+        # Extract origin and destination coordinates if available
+        origin_coords = None
+        destination_coords = None
+        
+        if geometry and 'paths' in geometry and geometry['paths']:
+            paths = geometry['paths']
+            if len(paths) > 0 and len(paths[0]) > 0:
+                # First coordinate as origin
+                if len(paths[0][0]) >= 2:
+                    origin_coords = {
+                        'longitude': paths[0][0][0],
+                        'latitude': paths[0][0][1]
+                    }
+                
+                # Last coordinate as destination
+                if len(paths[0][-1]) >= 2:
+                    destination_coords = {
+                        'longitude': paths[0][-1][0],
+                        'latitude': paths[0][-1][1]
+                    }
+        
+        # Day mapping for attribute names
+        day_trips = {
+            'Lunes': attributes.get('viajes_OD_Lunes', 0),
+            'Martes': attributes.get('viajes_OD_Martes', 0),
+            'Miercoles': attributes.get('viajes_OD_Miercoles', 0),
+            'Jueves': attributes.get('viajes_OD_Jueves', 0),
+            'Viernes': attributes.get('viajes_OD_Viernes', 0),
+            'Sabado': attributes.get('viajes_OD_Sabado', 0),
+            'Domingo': attributes.get('viajes_OD_Domingo', 0)
+        }
+        
+        trips = []
+        
+        # For each date in 2024
+        for date_info in dates_2024:
+            day_spanish = date_info['day_name_spanish']
+            average_trips = day_trips.get(day_spanish, 0)
+            
+            # Generate actual number of trips for this day based on distribution mode
+            actual_trips = self._generate_trips_for_day(average_trips)
+            
+            # Create actual_trips individual records for this date
+            for trip_num in range(actual_trips):
+                # Generate cargo characteristics
+                cargo_type = self._generate_cargo_type()
+                volumen_palets = self._generate_volume()
+                peso_kg = self._generate_weight(volumen_palets)
+                precio_euros = self._generate_price(attributes.get('SHAPE_Length', 0))
+                
+                trip_record = {
+                    # Original feature info
+                    'objectid': attributes.get('OBJECTID'),
+                    'fecha': date_info['date'].strftime('%Y-%m-%d'),
+                    'dia_semana': day_spanish,
+                    
+                    # Origin information
+                    'nombre_zona_origen': attributes.get('nombre_zona_origen'),
+                    'cod_zona_origen': attributes.get('cod_zona_origen'),
+                    'origen_longitude': origin_coords['longitude'] if origin_coords else None,
+                    'origen_latitude': origin_coords['latitude'] if origin_coords else None,
+                    
+                    # Destination information
+                    'nombre_zona_destino': attributes.get('nombre_zona_destino'),
+                    'cod_zona_destino': attributes.get('cod_zona_destino'),
+                    'destino_longitude': destination_coords['longitude'] if destination_coords else None,
+                    'destino_latitude': destination_coords['latitude'] if destination_coords else None,
+                    
+                    # Cargo information (new columns)
+                    'tipo_mercancia': cargo_type,
+                    'volumen': volumen_palets,
+                    'peso': peso_kg,
+                    'precio': precio_euros
+                }
+                
+                trips.append(trip_record)
+        
+        return trips
     
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from file."""
@@ -161,90 +435,157 @@ class DataPreprocessor:
     
     def _read_json_file(self, file_path: Path) -> pd.DataFrame:
         """
-        Read JSON file with intelligent structure detection.
+        Read JSON file with intelligent structure detection and expand to individual trips.
         
-        This method handles different JSON structures:
-        - Simple JSON arrays
-        - Flat JSON objects
-        - GeoJSON-like structures with features array
-        - ESRI JSON format with features
+        This method handles different JSON structures and expands features into individual
+        trip records for the year 2024 based on daily averages.
         
         Args:
             file_path (Path): Path to the JSON file
             
         Returns:
-            pd.DataFrame: DataFrame containing the JSON data
+            pd.DataFrame: DataFrame containing expanded trip records
         """
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
+            # Generate all dates for 2024
+            dates_2024 = self._generate_2024_dates()
+            self.logger.info(f"Generated {len(dates_2024)} dates for 2024")
+            
             # Case 1: Data is already a list (simple JSON array)
             if isinstance(data, list):
+                self.logger.warning("Simple JSON array detected. Hermes expansion not applicable.")
                 return pd.DataFrame(data)
             
-            # Case 2: Data is a dictionary
-            if isinstance(data, dict):
-                # Check for GeoJSON-like structure with 'features' key
-                if 'features' in data:
-                    features = data['features']
-                    
-                    # Extract attributes from each feature
-                    records = []
-                    for feature in features:
-                        if isinstance(feature, dict):
-                            # Try to get attributes (common in ESRI JSON)
-                            if 'attributes' in feature:
-                                record = feature['attributes'].copy()
-                            else:
-                                record = feature.copy()
-                            
-                            # Add geometry information if available
-                            if 'geometry' in feature and feature['geometry']:
-                                geom = feature['geometry']
-                                if isinstance(geom, dict):
-                                    # Add basic geometry info
-                                    record['geometry_type'] = geom.get('type', 'unknown')
-                                    
-                                    # For coordinate extraction (simplified)
-                                    if 'coordinates' in geom:
-                                        coords = geom['coordinates']
-                                        if coords and isinstance(coords, list):
-                                            if len(coords) > 0 and isinstance(coords[0], list):
-                                                # Multi-dimensional coordinates (polyline, polygon)
-                                                record['has_geometry'] = True
-                                                record['coordinate_count'] = len(coords)
-                                            else:
-                                                # Simple point coordinates
-                                                if len(coords) >= 2:
-                                                    record['longitude'] = coords[0]
-                                                    record['latitude'] = coords[1]
-                            
-                            records.append(record)
-                    
-                    if records:
-                        df = pd.DataFrame(records)
-                        self.logger.info(f"Extracted {len(records)} features from GeoJSON-like structure")
-                        return df
+            # Case 2: Data is a dictionary - Check for GeoJSON-like structure with 'features'
+            if isinstance(data, dict) and 'features' in data:
+                features = data['features']
                 
-                # Case 3: Try to use the dictionary directly as a single record
+                # For memory efficiency, write progressively to CSV
+                return self._process_features_progressively(features, dates_2024, file_path)
+            
+            # Fallback cases
+            if isinstance(data, dict):
                 try:
                     return pd.DataFrame([data])
                 except:
-                    # Case 4: Try to normalize nested JSON
                     return pd.json_normalize(data)
             
-            # Fallback: try pandas read_json
+            # Final fallback
             return pd.read_json(file_path)
             
         except Exception as e:
-            self.logger.warning(f"Custom JSON parsing failed for {file_path}: {e}")
-            # Fallback to pandas read_json
-            try:
-                return pd.read_json(file_path)
-            except Exception as e2:
-                self.logger.error(f"All JSON parsing methods failed for {file_path}: {e2}")
-                raise Exception(f"Could not parse JSON file {file_path}: {e2}")
+            self.logger.error(f"All JSON parsing methods failed for {file_path}: {e}")
+            raise Exception(f"Could not parse JSON file {file_path}: {e}")
+    
+    def _process_features_progressively(self, features: List[Dict], dates_2024: List[Dict], file_path: Path) -> pd.DataFrame:
+        """
+        Process features progressively, writing to CSV in chunks to avoid memory issues.
+        
+        Args:
+            features (List[Dict]): List of features from JSON
+            dates_2024 (List[Dict]): List of all 2024 dates
+            file_path (Path): Path to original JSON file
+            
+        Returns:
+            pd.DataFrame: Summary DataFrame with basic statistics
+        """
+        # Determine output file path
+        output_filename = self.config["output_filename"]
+        name_parts = output_filename.rsplit('.', 1)
+        if len(name_parts) == 2:
+            base_name, extension = name_parts
+            base_name = f"{base_name}_{self.distribution_mode}"
+            
+            if self.target_objectid is not None:
+                base_name = f"{base_name}_objectid_{self.target_objectid}"
+            else:
+                base_name = f"{base_name}_full_dataset"
+            
+            output_filename = f"{base_name}.{extension}"
+        else:
+            output_filename = f"{output_filename}_{self.distribution_mode}"
+            if self.target_objectid is not None:
+                output_filename = f"{output_filename}_objectid_{self.target_objectid}"
+            else:
+                output_filename = f"{output_filename}_full_dataset"
+        
+        output_path = self.output_dir / output_filename
+        
+        # Progressive processing variables
+        processed_features = 0
+        total_trips_written = 0
+        header_written = False
+        batch_size = 50  # Process features in batches
+        
+        # Calculate total number of batches for progress tracking
+        total_batches = (len(features) + batch_size - 1) // batch_size  # Ceiling division
+        
+        self.logger.info(f"Starting progressive processing of {len(features)} features in {total_batches} batches")
+        
+        for i in range(0, len(features), batch_size):
+            batch_number = i // batch_size + 1
+            batch_features = features[i:i + batch_size]
+            batch_trips = []
+            
+            for feature in batch_features:
+                if isinstance(feature, dict) and 'attributes' in feature:
+                    attributes = feature['attributes']
+                    objectid = attributes.get('OBJECTID')
+                    
+                    # If target_objectid is specified, only process that feature
+                    if self.target_objectid is not None:
+                        if objectid != self.target_objectid:
+                            continue
+                    
+                    # Expand this feature to individual trips
+                    feature_trips = self._expand_feature_to_trips(feature, dates_2024)
+                    batch_trips.extend(feature_trips)
+                    processed_features += 1
+                    
+                    # If we're in validation mode and found our target, break
+                    if self.target_objectid is not None and objectid == self.target_objectid:
+                        break
+            
+            # Write this batch to CSV
+            if batch_trips:
+                batch_df = pd.DataFrame(batch_trips)
+                
+                # Write to CSV (append mode after first batch)
+                write_mode = 'w' if not header_written else 'a'
+                write_header = not header_written
+                
+                batch_df.to_csv(output_path, mode=write_mode, header=write_header, index=False)
+                
+                total_trips_written += len(batch_trips)
+                header_written = True
+                
+                self.logger.info(f"Batch {batch_number}/{total_batches}: Processed {len(batch_features)} features, "
+                               f"wrote {len(batch_trips)} trips. Total: {total_trips_written} trips")
+                
+                # Clear batch from memory
+                del batch_trips, batch_df
+            
+            # If we're in validation mode and found our target, break
+            if self.target_objectid is not None and processed_features > 0:
+                break
+        
+        self.logger.info(f"Progressive processing complete: {processed_features} features -> {total_trips_written} trip records")
+        
+        if self.target_objectid is not None:
+            self.logger.info(f"Validation mode: processed only OBJECTID {self.target_objectid}")
+        
+        # Return a summary DataFrame for compatibility
+        summary_data = {
+            'processed_features': [processed_features],
+            'total_trips': [total_trips_written],
+            'output_file': [str(output_path)],
+            'processing_mode': [f"{self.distribution_mode}_{'single_route' if self.target_objectid else 'full_dataset'}"]
+        }
+        
+        return pd.DataFrame(summary_data)
     
     def standardize_columns(self, df: pd.DataFrame, source_file: str) -> pd.DataFrame:
         """
@@ -370,7 +711,7 @@ class DataPreprocessor:
         Process all discovered data files and combine them into a single DataFrame.
         
         Returns:
-            pd.DataFrame: Combined and processed DataFrame
+            pd.DataFrame: Combined and processed DataFrame or summary info
         """
         data_files = self.discover_data_files()
         
@@ -378,17 +719,32 @@ class DataPreprocessor:
             raise ValueError(f"No supported data files found in {self.input_dir}")
         
         combined_data = []
+        progressive_processing_used = False
         
         for file_path in data_files:
             try:
                 # Read the file
                 df = self.read_data_file(file_path)
                 
-                # Standardize columns
-                df = self.standardize_columns(df, file_path.name)
-                
-                # Add to combined data
-                combined_data.append(df)
+                # For Hermes JSON files, check if progressive processing was used
+                if file_path.suffix.lower() == '.json' and not df.empty:
+                    if 'processed_features' in df.columns:
+                        # This is a summary from progressive processing
+                        self.logger.info(f"Hermes JSON processed progressively: {df['processed_features'].iloc[0]} features -> {df['total_trips'].iloc[0]} trips")
+                        progressive_processing_used = True
+                        combined_data.append(df)
+                    elif 'objectid' in df.columns:
+                        # Standard processing - no need to add source file info
+                        self.logger.info(f"Hermes JSON processed: {len(df)} trip records from {file_path.name}")
+                        combined_data.append(df)
+                    else:
+                        # Other JSON format
+                        df = self.standardize_columns(df, file_path.name)
+                        combined_data.append(df)
+                else:
+                    # Standardize columns for other file types
+                    df = self.standardize_columns(df, file_path.name)
+                    combined_data.append(df)
                 
             except Exception as e:
                 self.logger.error(f"Failed to process file {file_path}: {e}")
@@ -397,7 +753,13 @@ class DataPreprocessor:
         if not combined_data:
             raise ValueError("No files were successfully processed")
         
-        # Combine all DataFrames
+        # If progressive processing was used, return summary info
+        if progressive_processing_used:
+            combined_df = pd.concat(combined_data, ignore_index=True, sort=False)
+            self.logger.info(f"Progressive processing completed for {len(data_files)} files")
+            return combined_df
+        
+        # Standard processing - combine all DataFrames
         combined_df = pd.concat(combined_data, ignore_index=True, sort=False)
         
         # Clean and validate the combined data
@@ -417,7 +779,50 @@ class DataPreprocessor:
         Returns:
             str: Path to the saved file
         """
+        # Check if this is a summary from progressive processing
+        if 'output_file' in df.columns and len(df) == 1:
+            output_path = df['output_file'].iloc[0]
+            
+            # Log summary statistics for progressive processing
+            processed_features = df['processed_features'].iloc[0]
+            total_trips = df['total_trips'].iloc[0]
+            processing_mode = df['processing_mode'].iloc[0]
+            
+            self.logger.info(f"Progressive processing completed: {output_path}")
+            self.logger.info(f"Output file summary: {total_trips} rows (from {processed_features} features)")
+            
+            # Additional statistics for trip data
+            self.logger.info(f"Processing mode: {processing_mode}")
+            
+            return str(output_path)
+        
+        # Standard processing - save DataFrame to CSV
         output_filename = self.config["output_filename"]
+        
+        # Split filename to insert distribution mode and scope info
+        name_parts = output_filename.rsplit('.', 1)
+        if len(name_parts) == 2:
+            base_name, extension = name_parts
+            # Add distribution mode to filename
+            base_name = f"{base_name}_{self.distribution_mode}"
+            
+            # Add scope info based on whether we're processing a specific OBJECTID or full dataset
+            if self.target_objectid is not None:
+                base_name = f"{base_name}_objectid_{self.target_objectid}"
+            else:
+                base_name = f"{base_name}_full_dataset"
+            
+            output_filename = f"{base_name}.{extension}"
+        else:
+            # Add distribution mode to filename
+            output_filename = f"{output_filename}_{self.distribution_mode}"
+            
+            # Add scope info based on whether we're processing a specific OBJECTID or full dataset
+            if self.target_objectid is not None:
+                output_filename = f"{output_filename}_objectid_{self.target_objectid}"
+            else:
+                output_filename = f"{output_filename}_full_dataset"
+        
         output_path = self.output_dir / output_filename
         
         try:
@@ -427,6 +832,12 @@ class DataPreprocessor:
             # Log summary statistics
             self.logger.info(f"Output file summary: {len(df)} rows, {len(df.columns)} columns")
             self.logger.info(f"Columns: {list(df.columns)}")
+            
+            # Additional statistics for trip data
+            if 'objectid' in df.columns:
+                unique_features = df['objectid'].nunique()
+                date_range = f"{df['fecha'].min()} to {df['fecha'].max()}" if 'fecha' in df.columns else 'N/A'
+                self.logger.info(f"Trip data summary: {unique_features} unique routes, date range: {date_range}")
             
             return str(output_path)
             

@@ -21,10 +21,13 @@ def main():
         epilog="""
 Available modules:
   preprocessing     Process raw delivery data into standardized CSV format
+                   Expands Hermes JSON features into individual trip records
 
 Examples:
   python src/main.py preprocessing --help
   python src/main.py preprocessing --input-dir data/raw --output-dir data/processed
+  python src/main.py preprocessing --objectid 1  # Validation mode for specific OBJECTID
+  python src/main.py preprocessing --distribution poisson --seed 42  # Use Poisson distribution
         """
     )
     

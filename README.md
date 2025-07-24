@@ -86,17 +86,82 @@ python src/preprocessing/main.py
 
 #### Option 3: With custom parameters
 ```bash
-python src/preprocessing/main.py --input-dir data/raw --output-dir data/processed --config config/config.json
+# Basic preprocessing with exact distribution
+python src/preprocessing/main.py --input-dir data/raw/hermes --output-dir data/processed --distribution exact
+
+# With Poisson distribution for realistic variability
+python src/preprocessing/main.py --input-dir data/raw/hermes --output-dir data/processed --distribution poisson --seed 42
+
+# Validation mode - process only one OBJECTID
+python src/preprocessing/main.py --input-dir data/raw/hermes --output-dir data/processed --distribution exact --objectid 1
+
+# Full dataset with normal distribution
+python src/preprocessing/main.py --input-dir data/raw/hermes --output-dir data/processed --distribution normal --seed 123
 ```
+
+## 🚛 Hermes Trip Expansion
+
+Atlas includes specialized functionality for processing Hermes transportation data:
+
+### Trip Expansion Features
+- **JSON Feature Processing**: Converts Hermes JSON features into individual trip records
+- **2024 Date Generation**: Creates trip records for every day of 2024
+- **Distribution Modes**: Three modes for generating realistic trip variability:
+  - `exact`: Generate exactly the average number of trips per day
+  - `poisson`: Use Poisson distribution around the average (realistic variability)
+  - `normal`: Use truncated normal distribution around the average
+
+### Distribution Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `exact` | Generates exactly the average trips per day | Testing, baseline analysis |
+| `poisson` | Poisson distribution around average | Realistic daily variability |
+| `normal` | Normal distribution around average | Alternative variability model |
+
+### Validation Mode
+Process specific routes for testing:
+```bash
+python src/preprocessing/main.py --objectid 1 --distribution exact
+```
+
+### File Naming Convention
+Output files include distribution mode and scope:
+- Single route: `processed_delivery_data_poisson_objectid_1.csv`
+- Full dataset: `processed_delivery_data_exact_full_dataset.csv`
 
 ## 📊 Data Format
 
 ### Input Data
 The preprocessor accepts multiple file formats:
 - **CSV files** (`.csv`)
-- **JSON files** (`.json`)
+- **JSON files** (`.json`) - Including Hermes transportation data
 - **Excel files** (`.xlsx`)
 - **Text files** (`.txt`)
+
+### Hermes JSON Format
+For Hermes transportation data, the system processes JSON files with:
+- **Features array**: Contains transportation route data
+- **Attributes**: Route information including daily trip averages
+- **Geometry**: Coordinate paths for routes
+- **Trip expansion**: Converts weekly averages into daily trip records for 2024
+
+Example Hermes feature structure:
+```json
+{
+  "attributes": {
+    "OBJECTID": 1,
+    "nombre_zona_origen": "Vitoria-Gasteiz",
+    "nombre_zona_destino": "Madrid",
+    "viajes_OD_Lunes": 5,
+    "viajes_OD_Martes": 6,
+    "viajes_OD_Miercoles": 4,
+    "viajes_OD_Jueves": 6,
+    "viajes_OD_Viernes": 3,
+    "viajes_OD_Sabado": 0,
+    "viajes_OD_Domingo": 3
+  }
+}
 
 ### Expected Data Columns
 The system can automatically map common column variations, but the following are the standard column names:
@@ -121,12 +186,36 @@ The system can automatically map common column variations, but the following are
 | `package_type` | Type of package | `electronics`, `documents`, etc. |
 
 ### Output Data
-The preprocessor outputs a standardized CSV file with:
+The preprocessor outputs different formats depending on input:
+
+#### Standard CSV Processing
+For regular delivery data, outputs a standardized CSV file with:
 - Cleaned and validated data
 - Standardized column names
 - Additional metadata columns:
   - `source_file`: Original file name
   - `processed_timestamp`: When the data was processed
+
+#### Hermes Trip Expansion
+For Hermes JSON data, outputs expanded trip records with:
+- **Individual trip records**: One row per trip occurrence
+- **Date information**: Full 2024 calendar with Spanish day names
+- **Distribution metadata**: Mode used and actual vs average trips
+- **Route details**: Origin/destination coordinates and zone information
+- **Trip numbering**: Sequential numbering within each day
+
+Example expanded output columns:
+| Column | Description | Example |
+|--------|-------------|---------|
+| `objectid` | Route identifier | `1` |
+| `fecha` | Trip date | `2024-01-15` |
+| `dia_semana` | Day of week (Spanish) | `Lunes` |
+| `nombre_zona_origen` | Origin zone name | `Vitoria-Gasteiz` |
+| `nombre_zona_destino` | Destination zone name | `Madrid` |
+| `numero_viaje_dia` | Trip number for that day | `1`, `2`, `3`... |
+| `total_viajes_dia` | Total trips generated for day | `5` |
+| `promedio_viajes_dia` | Original average for day | `5.0` |
+| `modo_distribucion` | Distribution mode used | `poisson` |
 
 ## ⚙️ Configuration
 
@@ -136,34 +225,70 @@ The system uses a JSON configuration file (`config/config.json`) that controls:
 - **Data analysis parameters**: Coordinate precision, measurement units
 - **Logging configuration**: Log levels, file locations
 
+### Command Line Parameters
+
+The preprocessing module supports various parameters:
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `--input-dir` | Directory with raw data files | `data/raw/hermes` |
+| `--output-dir` | Output directory for processed files | `data/processed` |
+| `--distribution` | Distribution mode for trip generation | `exact`, `poisson`, `normal` |
+| `--objectid` | Process specific OBJECTID (validation mode) | `1` |
+| `--seed` | Random seed for reproducibility | `42` |
+| `--config` | Custom configuration file path | `config/custom.json` |
+
 Example configuration excerpt:
 ```json
 {
   "preprocessing": {
     "coordinate_precision": 6,
     "weight_unit": "kg",
-    "volume_unit": "m3"
+    "volume_unit": "m3",
+    "output_filename": "processed_delivery_data.csv"
   }
 }
 ```
 
 ## 🧪 Testing
 
+### Basic Testing
 Run the preprocessing pipeline:
 ```bash
 python src/main.py preprocessing
 ```
 
+### Hermes Data Testing
+Test with specific distribution modes:
+
+```bash
+# Test exact distribution with validation
+python src/preprocessing/main.py --input-dir data/raw/hermes --output-dir data/processed --distribution exact --objectid 1
+
+# Test Poisson distribution with full dataset
+python src/preprocessing/main.py --input-dir data/raw/hermes --output-dir data/processed --distribution poisson --seed 42
+
+# Test normal distribution
+python src/preprocessing/main.py --input-dir data/raw/hermes --output-dir data/processed --distribution normal --seed 123
+```
+
 This will:
 1. Read your raw data files from `data/raw/`
 2. Process the data through the preprocessing pipeline
-3. Output a clean CSV file in `data/processed/`
-4. Display summary statistics
+3. Output a clean CSV file in `data/processed/` with appropriate naming
+4. Display summary statistics including:
+   - Total trip records generated
+   - Distribution mode statistics
+   - Date range covered
+   - Unique routes processed
 
 ## 📁 Data Directories
 
 - **`data/raw/`**: Place your raw data files here (CSV, JSON, Excel, etc.)
-- **`data/processed/`**: Processed CSV files will be saved here
+  - **`data/raw/hermes/`**: Specifically for Hermes transportation JSON files
+- **`data/processed/`**: Processed CSV files will be saved here with descriptive names:
+  - `processed_delivery_data_exact_objectid_1.csv` (single route validation)
+  - `processed_delivery_data_poisson_full_dataset.csv` (complete dataset)
 - **`data/interim/`**: For intermediate processing steps (future use)
 
 ## 🔍 Logging
@@ -195,6 +320,9 @@ The modular structure allows easy extension:
 - [ ] Real-time data processing capabilities
 - [ ] Web-based dashboard for data exploration
 - [ ] Integration with GIS systems
+- [ ] Advanced distribution models for trip generation
+- [ ] Route optimization analysis
+- [ ] Temporal pattern analysis tools
 
 ## 🤝 Contributing
 

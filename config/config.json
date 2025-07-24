@@ -2,6 +2,22 @@
   "preprocessing": {
     "coordinate_precision": 6,
     "weight_unit": "kg",
-    "volume_unit": "m3"
+    "volume_unit": "m3",
+    "truck_capacity": {
+      "max_palets": 10,
+      "min_palets": 1
+    },
+    "cargo_types": {
+      "normal_percentage": 70,
+      "refrigerada_percentage": 30
+    },
+    "weight_per_palet": {
+      "min_kg": 50,
+      "max_kg": 800
+    },
+    "pricing": {
+      "base_price_per_km": 1.2,
+      "price_variation_percent": 20
+    }
   }
 }
