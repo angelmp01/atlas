@@ -16,7 +16,7 @@
       "max_kg": 800
     },
     "pricing": {
-      "base_price_per_km": 1.2,
+      "base_price_per_km": 100,
       "price_variation_percent": 20
     }
   }
