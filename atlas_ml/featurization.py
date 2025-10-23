@@ -54,7 +54,10 @@ class FeatureBuilder:
         if 'date' in df.columns:
             time_features = df['date'].apply(create_time_features)
             time_df = pd.DataFrame(list(time_features))
-            df = pd.concat([df, time_df], axis=1)
+            # Only add columns that don't already exist to avoid duplicates
+            new_cols = [col for col in time_df.columns if col not in df.columns]
+            if new_cols:
+                df = pd.concat([df, time_df[new_cols]], axis=1)
         
         # Distance features
         if all(col in df.columns for col in ['origin_lat', 'origin_lon', 'destination_lat', 'destination_lon']):
@@ -425,6 +428,13 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
     
     # Build features
     df = feature_builder.build_features(df, include_tau=(config.training.training_regime == "regime_a"))
+    
+    # Check for duplicate columns (critical for XGBoost)
+    if df.columns.duplicated().any():
+        dup_cols = df.columns[df.columns.duplicated()].tolist()
+        logger.warning(f"Duplicate columns detected: {dup_cols}")
+        logger.warning("Removing duplicate columns...")
+        df = df.loc[:, ~df.columns.duplicated()]
     
     # Optimize memory usage by downcasting numeric types
     logger.info("Optimizing memory usage...")

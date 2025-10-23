@@ -109,8 +109,19 @@ class RegressionEstimator:
         )
         
         # Prepare training data
+        # Exclude non-numeric columns (use their encoded versions instead)
+        exclude_cols = ['date', self.target_column, 'origin_id', 'destination_id']
+        
+        # Exclude all categorical/string columns (keep only their encoded versions)
+        for col in df_features.columns:
+            if col not in exclude_cols:
+                # Exclude if column is object/string type or ends with common categorical suffixes
+                if df_features[col].dtype == 'object' or df_features[col].dtype.name == 'category':
+                    exclude_cols.append(col)
+                    logger.debug(f"Excluding non-numeric column: {col} (dtype: {df_features[col].dtype})")
+        
         feature_columns = [col for col in df_features.columns 
-                          if col not in ['date', self.target_column, 'origin_id', 'destination_id']]
+                          if col not in exclude_cols]
         
         X = df_features[feature_columns].fillna(0)
         y = df_features[self.target_column]
@@ -140,7 +151,11 @@ class RegressionEstimator:
         
         # Final training on all data
         X_train = X_scaled.drop(columns=['date'], errors='ignore')
-        self.model.fit(X_train, y)
+        
+        # Convert to numpy for better GPU transfer efficiency
+        X_train_array = X_train.values if hasattr(X_train, 'values') else X_train
+        y_array = y.values if hasattr(y, 'values') else y
+        self.model.fit(X_train_array, y_array)
         
         # Store feature names
         self.feature_names = list(X_train.columns)

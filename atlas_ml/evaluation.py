@@ -301,8 +301,17 @@ class CrossValidator:
             # Get train/test data
             X_train = X.loc[train_idx].drop(columns=[date_col], errors='ignore')
             X_test = X.loc[test_idx].drop(columns=[date_col], errors='ignore')
+            
+            # Ensure y is 1D numpy array, not DataFrame
             y_train = y.loc[train_idx]
+            if isinstance(y_train, pd.DataFrame):
+                y_train = y_train.iloc[:, 0]  # Take first column as Series
+            y_train = y_train.values  # Convert to numpy array
+            
             y_test = y.loc[test_idx]
+            if isinstance(y_test, pd.DataFrame):
+                y_test = y_test.iloc[:, 0]
+            y_test = y_test.values  # Convert to numpy array
             
             # Train model
             model = model_class(**model_params)
@@ -314,7 +323,7 @@ class CrossValidator:
             
             # Evaluate
             fold_metrics = ModelEvaluator.evaluate_binary_classifier(
-                y_test.values, y_pred_proba, y_pred_binary
+                y_test, y_pred_proba, y_pred_binary  # y_test is already numpy array
             )
             fold_metrics['fold'] = fold_idx
             fold_metrics['train_size'] = len(train_idx)
@@ -326,7 +335,7 @@ class CrossValidator:
             pred_df = pd.DataFrame({
                 'fold': fold_idx,
                 'index': test_idx,
-                'y_true': y_test.values,
+                'y_true': y_test,  # Already numpy array
                 'y_pred_proba': y_pred_proba,
                 'y_pred_binary': y_pred_binary
             })
@@ -403,8 +412,17 @@ class CrossValidator:
             # Get train/test data
             X_train = X.loc[train_idx].drop(columns=[date_col], errors='ignore')
             X_test = X.loc[test_idx].drop(columns=[date_col], errors='ignore')
+            
+            # Ensure y is 1D numpy array, not DataFrame - XGBoost requires this
             y_train = y.loc[train_idx]
+            if isinstance(y_train, pd.DataFrame):
+                y_train = y_train.iloc[:, 0]  # Take first column as Series
+            y_train = y_train.values  # Convert to numpy array
+            
             y_test = y.loc[test_idx]
+            if isinstance(y_test, pd.DataFrame):
+                y_test = y_test.iloc[:, 0]
+            y_test = y_test.values  # Convert to numpy array
             
             # Train model
             model = model_class(**model_params)
@@ -416,11 +434,11 @@ class CrossValidator:
             # Evaluate
             if is_poisson:
                 fold_metrics = ModelEvaluator.evaluate_poisson_regressor(
-                    y_test.values, y_pred
+                    y_test, y_pred
                 )
             else:
                 fold_metrics = ModelEvaluator.evaluate_regressor(
-                    y_test.values, y_pred
+                    y_test, y_pred  # y_test is already numpy array
                 )
             
             fold_metrics['fold'] = fold_idx
@@ -433,7 +451,7 @@ class CrossValidator:
             pred_df = pd.DataFrame({
                 'fold': fold_idx,
                 'index': test_idx,
-                'y_true': y_test.values,
+                'y_true': y_test,  # Already numpy array
                 'y_pred': y_pred
             })
             all_predictions.append(pred_df)

@@ -52,8 +52,8 @@ class ModelConfig(BaseModel):
             "objective": "binary:logistic",  # Will be overridden for regressors
             "random_state": 42,
             "n_jobs": -1,
-            "tree_method": "gpu_hist",  # Use "gpu_hist" for GPU acceleration / "hist" for CPU
-            "device": "cuda",     # Uncomment to enable GPU (requires CUDA + xgboost[cuda])
+            "tree_method": "hist",
+            "device": "cuda",
         },
         description="XGBoost hyperparameters"
     )

@@ -413,15 +413,19 @@ class DatasetBuilder:
         Returns:
             DataFrame with OD-level aggregates
         """
+        logger.info(f"Aggregating {len(df):,} records to daily OD level...")
+        logger.info("This may take several minutes for large datasets...")
+        
         # Daily aggregates by (origin_id, destination_id)
+        # Use 'first' instead of mode() for categorical - much faster and equivalent for most cases
         od_daily = df.groupby(['date', 'origin_id', 'destination_id']).agg({
             'n_trips': 'sum',
             'precio': ['mean', 'median', 'std'],
             'peso': ['mean', 'median', 'std'],
             'volumen': ['mean', 'median', 'std'],
             'od_length_km': 'mean',
-            'truck_type': lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else 'normal',
-            'tipo_mercancia': lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else 'normal'
+            'truck_type': 'first',  # Take first value (faster than mode)
+            'tipo_mercancia': 'first'
         }).reset_index()
         
         # Flatten column names
@@ -443,11 +447,13 @@ class DatasetBuilder:
             'volumen_median': 'volumen_median_daily',
             'volumen_std': 'volumen_std_daily',
             'od_length_km_mean': 'od_length_km',
-            'truck_type_<lambda>': 'truck_type',
-            'tipo_mercancia_<lambda>': 'tipo_mercancia'
+            'truck_type_first': 'truck_type',
+            'tipo_mercancia_first': 'tipo_mercancia'
         }
         
         od_daily = od_daily.rename(columns=rename_dict)
+        
+        logger.info(f"Aggregation completed: {len(od_daily):,} daily OD pairs")
         
         return od_daily
 
