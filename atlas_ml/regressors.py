@@ -126,6 +126,11 @@ class RegressionEstimator:
         X = df_features[feature_columns].fillna(0)
         y = df_features[self.target_column]
         
+        # Reset index to avoid XGBoost QuantileDMatrix errors with non-unique indices
+        df_features = df_features.reset_index(drop=True)
+        X = X.reset_index(drop=True)
+        y = y.reset_index(drop=True)
+        
         # Optional: log-transform target for price to handle skewness
         if self.target_type == 'price':
             y = np.log1p(y)  # log(1 + price) to handle zeros
@@ -135,7 +140,7 @@ class RegressionEstimator:
         
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
-        X_scaled = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
+        X_scaled = pd.DataFrame(X_scaled, columns=X.columns)
         
         # Train model
         self.model = self._create_model()

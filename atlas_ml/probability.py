@@ -134,9 +134,14 @@ class ProbabilityEstimator:
         X = df_features[feature_columns].fillna(0)
         y = df_features['n_trips_daily'].clip(lower=0)  # Ensure non-negative
         
+        # Reset index to avoid XGBoost QuantileDMatrix errors with non-unique indices
+        df_features = df_features.reset_index(drop=True)
+        X = X.reset_index(drop=True)
+        y = y.reset_index(drop=True)
+        
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
-        X_scaled = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
+        X_scaled = pd.DataFrame(X_scaled, columns=X.columns)
         
         # Train count model
         self.model = self._create_model(self.config.model.probability_model_type, is_classifier=False)
