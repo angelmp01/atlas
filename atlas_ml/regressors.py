@@ -277,7 +277,6 @@ def train_price(config: Config) -> ModelBundle:
     model_card = create_model_card(
         model_type=estimator.model_type,
         task_type="price",
-        training_regime=None,  # Not applicable for regression
         features=estimator.feature_names,
         cv_results=training_results['cv_results'],
         config=config,
@@ -351,7 +350,6 @@ def train_weight(config: Config) -> ModelBundle:
     model_card = create_model_card(
         model_type=estimator.model_type,
         task_type="weight",
-        training_regime=None,  # Not applicable for regression
         features=estimator.feature_names,
         cv_results=training_results['cv_results'],
         config=config,

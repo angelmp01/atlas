@@ -264,30 +264,25 @@ def train_probability(config: Config) -> ModelBundle:
     # Initialize estimator
     estimator = ProbabilityEstimator(config)
     
-    # Train Regime B (only regime supported)
+    # Train (only one training mode supported)
     training_results = estimator.fit(df)
     
     # Create model card
     model_card = create_model_card(
         model_type=config.model.probability_model_type,
         task_type="probability",
-        training_regime='regime_b',
         features=estimator.feature_names,
         cv_results=training_results['cv_results'],
         config=config,
         additional_info={
-            'training_samples': training_results['training_samples'],
-            'regime_explanation': 'regime_b'
+            'training_samples': training_results['training_samples']
         }
     )
     
     # Save model bundle
     from .serialization import ModelVersionManager
     version_manager = ModelVersionManager(config.paths.models_dir)
-    bundle_path = version_manager.get_bundle_path(
-        'probability',
-        training_regime='regime_b'
-    )
+    bundle_path = version_manager.get_bundle_path('probability')
     
     # Prepare artifacts
     if estimator.feature_builder is None:
@@ -306,7 +301,6 @@ def train_probability(config: Config) -> ModelBundle:
         model_path=bundle_path,
         encoders=encoders,
         metadata=model_card,
-        training_regime='regime_b',
         config=config
     )
     

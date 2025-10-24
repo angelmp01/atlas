@@ -37,7 +37,6 @@ class ModelBundle:
         model_type: str,
         task_type: str,
         features: List[str],
-        training_regime: Optional[str] = None,
         version: str = "1.0.0"
     ):
         """
@@ -48,14 +47,12 @@ class ModelBundle:
             model_type: Type of model (e.g., 'xgboost', 'randomforest')
             task_type: Task type ('probability', 'price', 'weight')
             features: List of feature names
-            training_regime: Training regime for probability models ('regime_a' or 'regime_b')
             version: Model version string
         """
         self.model_path = Path(model_path)
         self.model_type = model_type
         self.task_type = task_type
         self.features = features
-        self.training_regime = training_regime
         self.version = version
         
         # Derived paths
@@ -133,7 +130,6 @@ class ModelBundle:
             "model_type": self.model_type,
             "task_type": self.task_type,
             "features": self.features,
-            "training_regime": self.training_regime,
             "version": self.version,
             "created_at": datetime.now().isoformat(),
             "bundle_hash": self._compute_bundle_hash(),
@@ -154,9 +150,6 @@ class ModelBundle:
         hash_obj.update(f"{self.model_type}:{self.task_type}".encode())
         hash_obj.update(":".join(sorted(self.features)).encode())
         
-        if self.training_regime:
-            hash_obj.update(self.training_regime.encode())
-        
         return hash_obj.hexdigest()[:16]
     
     def is_valid(self) -> bool:
@@ -169,7 +162,6 @@ class ModelBundle:
         return {
             "model_type": self.model_type,
             "task_type": self.task_type,
-            "training_regime": self.training_regime,
             "version": self.version,
             "num_features": len(self.features),
             "valid": self.is_valid(),
@@ -188,7 +180,6 @@ def save_model_bundle(
     encoders: Optional[Dict[str, Any]] = None,
     scaler: Optional[Any] = None,
     metadata: Optional[Dict[str, Any]] = None,
-    training_regime: Optional[str] = None,
     config: Optional[Config] = None
 ) -> ModelBundle:
     """
@@ -203,7 +194,6 @@ def save_model_bundle(
         encoders: Feature encoders dictionary
         scaler: Feature scaler object
         metadata: Additional metadata
-        training_regime: Training regime for probability models
         config: Configuration object
         
     Returns:
@@ -214,8 +204,7 @@ def save_model_bundle(
         model_path=model_path,
         model_type=model_type,
         task_type=task_type,
-        features=features,
-        training_regime=training_regime
+        features=features
     )
     
     # Save components
@@ -275,7 +264,6 @@ def load_bundle(model_path: Union[str, Path]) -> ModelBundle:
         model_type=metadata.get("model_type", "unknown"),
         task_type=metadata.get("task_type", "unknown"),
         features=metadata.get("features", []),
-        training_regime=metadata.get("training_regime"),
         version=metadata.get("version", "1.0.0")
     )
     
@@ -392,8 +380,7 @@ class ModelVersionManager:
     def get_bundle_path(
         self,
         task_type: str,
-        version: Optional[str] = None,
-        training_regime: Optional[str] = None
+        version: Optional[str] = None
     ) -> Path:
         """
         Get path for a model bundle.
@@ -401,7 +388,6 @@ class ModelVersionManager:
         Args:
             task_type: Task type ('probability', 'price', 'weight')
             version: Model version (if None, use timestamp)
-            training_regime: Training regime for probability models
             
         Returns:
             Path for model bundle
@@ -410,37 +396,28 @@ class ModelVersionManager:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             version = f"v{timestamp}"
         
-        # Include training regime in path for probability models
-        if task_type == "probability" and training_regime:
-            bundle_name = f"{task_type}_{training_regime}_{version}"
-        else:
-            bundle_name = f"{task_type}_{version}"
-        
+        bundle_name = f"{task_type}_{version}"
         return self.models_dir / bundle_name
     
     def get_latest_bundle(
         self,
-        task_type: str,
-        training_regime: Optional[str] = None
+        task_type: str
     ) -> Optional[ModelBundle]:
         """
         Get the latest model bundle for a task type.
         
         Args:
             task_type: Task type to search for
-            training_regime: Training regime filter for probability models
             
         Returns:
             Latest ModelBundle or None if not found
         """
         bundles = list_model_bundles(self.models_dir)
         
-        # Filter by task type and training regime
+        # Filter by task type
         filtered_bundles = [
             b for b in bundles
-            if b["task_type"] == task_type
-            and (training_regime is None or b.get("training_regime") == training_regime)
-            and b["valid"]
+            if b["task_type"] == task_type and b["valid"]
         ]
         
         if not filtered_bundles:

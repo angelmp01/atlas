@@ -2,7 +2,7 @@
 Script de entrenamiento para los modelos de ATLAS ML.
 
 Este script entrena los 3 modelos principales:
-1. Probability (Regimen B)
+1. Probability (daily trip counts)
 2. Price
 3. Weight
 
@@ -51,8 +51,8 @@ def train_all_models(config: Config):
     
     results = {}
     
-    # 1. Entrenar modelo de probabilidad (Regimen B)
-    logger.info("\n[1/3] Entrenando modelo de PROBABILIDAD (Regimen B)...")
+    # 1. Entrenar modelo de probabilidad
+    logger.info("\n[1/3] Entrenando modelo de PROBABILIDAD...")
     try:
         prob_model = train_probability(config)
         results['probability'] = {
@@ -157,7 +157,6 @@ Ejemplos de uso:
   python train.py --only probability      # Solo probability
   python train.py --only price            # Solo price
   python train.py --only weight           # Solo weight
-  python train.py --regime B              # Especificar regimen (A o B)
         """
     )
     
@@ -168,14 +167,6 @@ Ejemplos de uso:
         help='Entrenar solo un modelo especifico'
     )
     
-    parser.add_argument(
-        '--regime',
-        type=str,
-        choices=['A', 'B'],
-        default='B',
-        help='Regimen de entrenamiento para probability (default: B)'
-    )
-    
     args = parser.parse_args()
     
     # Crear directorio de logs si no existe
@@ -184,11 +175,6 @@ Ejemplos de uso:
     # Cargar configuracion
     logger.info("Cargando configuracion...")
     config = Config()
-    
-    # Note: Regime is now hardcoded to B in probability.py
-    # args.regime is ignored (kept for CLI compatibility)
-    if args.regime.lower() != 'b':
-        logger.warning(f"Regime {args.regime} is not supported anymore. Using Regime B (only regime supported).")
     
     # Entrenar
     try:

@@ -495,7 +495,6 @@ class CrossValidator:
 def create_model_card(
     model_type: str,
     task_type: str,
-    training_regime: Optional[str],
     features: List[str],
     cv_results: Dict[str, Any],
     config: Config,
@@ -510,7 +509,6 @@ def create_model_card(
     Args:
         model_type: Type of model ('xgboost', 'randomforest')
         task_type: Task type ('probability', 'price', 'weight')
-        training_regime: Training regime for probability models
         features: List of feature names
         cv_results: Cross-validation results
         config: Configuration used for training
@@ -524,7 +522,6 @@ def create_model_card(
         "model_info": {
             "model_type": model_type,
             "task_type": task_type,
-            "training_regime": training_regime,
             "version": "1.0.0",
             "created_at": datetime.now().isoformat(),
         },
@@ -557,18 +554,17 @@ def create_model_card(
         
         # Model interpretation
         "interpretation": {
-            "training_regime_explanation": _get_regime_explanation(training_regime),
             "metric_explanations": _get_metric_explanations(task_type),
-            "limitations": _get_model_limitations(task_type, training_regime),
+            "limitations": _get_model_limitations(task_type),
         },
         
         # Technical details
         "technical": {
             "random_state": config.random_state,
             "feature_engineering": {
-                "target_encoding": True,
-                "historical_features": True,
-                "density_features": False,  # Currently disabled
+                "base_features": True,
+                "categorical_encoding": True,
+                "historical_features": False,  # Removed
             },
         }
     }
@@ -594,23 +590,6 @@ def create_model_card(
     return model_card
 
 
-def _get_regime_explanation(training_regime: Optional[str]) -> str:
-    """Get explanation of training regime."""
-    if training_regime == "regime_a":
-        return (
-            "Regime A: Trained on time-binned data with actual elapsed time labels. "
-            "Probability π(τ) is estimated directly from bin-level occurrence patterns."
-        )
-    elif training_regime == "regime_b":
-        return (
-            "Regime B: Trained on daily aggregated data. Daily trip counts are "
-            "distributed across time bins using a learned shape function. "
-            "Probability π(τ) = 1 - exp(-λ(τ) * W) where λ(τ) is the estimated rate."
-        )
-    else:
-        return "No specific training regime (applies to price/weight models)."
-
-
 def _get_metric_explanations(task_type: str) -> Dict[str, str]:
     """Get explanations of metrics for different task types."""
     if task_type == "probability":
@@ -629,25 +608,20 @@ def _get_metric_explanations(task_type: str) -> Dict[str, str]:
         }
 
 
-def _get_model_limitations(task_type: str, training_regime: Optional[str]) -> List[str]:
+def _get_model_limitations(task_type: str) -> List[str]:
     """Get list of model limitations and caveats."""
     limitations = [
-        "Model trained on historical data and may not capture future trends",
+        "Model trained on historical data (2024) and may not capture future trends",
         "Performance may degrade if operational patterns change significantly",
         "Feature importance may vary across different time periods"
     ]
     
     if task_type == "probability":
         limitations.extend([
-            "Probability estimates are conditioned on historical load patterns",
-            "Model assumes independence between different origin-destination pairs"
+            "Probability estimates use uniform distribution (simple assumption)",
+            "Model assumes independence between different origin-destination pairs",
+            "Trained on daily aggregated data without time-of-day information"
         ])
-        
-        if training_regime == "regime_b":
-            limitations.extend([
-                "Regime B uses simplified time distribution assumptions",
-                "Actual time-of-day patterns may differ from learned shape function"
-            ])
     
     if task_type in ["price", "weight"]:
         limitations.extend([
