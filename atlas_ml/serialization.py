@@ -86,9 +86,15 @@ class ModelBundle:
     @property
     def scaler(self):
         """Lazy load feature scaler."""
-        if self._scaler is None and self.scaler_file.exists():
-            self._scaler = joblib.load(self.scaler_file)
-            logger.debug(f"Loaded scaler from {self.scaler_file}")
+        if self._scaler is None:
+            # Try loading from separate scaler file first
+            if self.scaler_file.exists():
+                self._scaler = joblib.load(self.scaler_file)
+                logger.debug(f"Loaded scaler from {self.scaler_file}")
+            # Fall back to scaler in encoders file
+            elif self.encoders and 'scaler' in self.encoders:
+                self._scaler = self.encoders['scaler']
+                logger.debug(f"Loaded scaler from encoders")
         return self._scaler
     
     @property

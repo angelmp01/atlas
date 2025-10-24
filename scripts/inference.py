@@ -32,22 +32,36 @@ logger = logging.getLogger(__name__)
 
 def find_latest_model(model_type: str, models_dir: Path = Path("models")) -> Path:
     """
-    Find the latest trained model of given type.
+    Find the latest trained model of given type based on timestamp in folder name.
+    
+    Model folders follow naming convention: {model_type}_v{YYYYMMDD_HHMMSS}
+    Example: probability_v20251024_230511
     
     Args:
         model_type: Type of model ('probability', 'price', 'weight')
-        models_dir: Directory containing model bundles
+        models_dir: Directory containing model bundles (default: 'models/')
         
     Returns:
         Path to latest model bundle
+        
+    Raises:
+        FileNotFoundError: If no models of specified type exist
     """
-    pattern = f"{model_type}_*"
+    if not models_dir.exists():
+        raise FileNotFoundError(f"Models directory not found: {models_dir}")
+    
+    pattern = f"{model_type}_v*"
     model_dirs = sorted(models_dir.glob(pattern), reverse=True)
     
     if not model_dirs:
-        raise FileNotFoundError(f"No trained models found for type: {model_type}")
+        raise FileNotFoundError(
+            f"No trained models found for type '{model_type}' in {models_dir}\n"
+            f"Expected pattern: {pattern}"
+        )
     
-    return model_dirs[0]
+    latest = model_dirs[0]
+    logger.info(f"Found {len(model_dirs)} model(s) of type '{model_type}', using latest: {latest.name}")
+    return latest
 
 
 def prepare_input_features(
@@ -117,7 +131,7 @@ def prepare_input_features(
                     AVG(volumen) as volumen_mean_daily,
                     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY volumen) as volumen_median_daily,
                     STDDEV(volumen) as volumen_std_daily
-                FROM app.sodd_loads_logistics
+                FROM app.sodd_loads_filtered
                 WHERE origin_id = :origin_id
                   AND destination_id = :destination_id
                   AND date < :ref_date  -- Use only historical data
@@ -304,14 +318,12 @@ def run_inference(
     
     # Apply scaling if model has scaler
     if bundle.scaler:
-        logger.info("Applying feature scaling")
+        logger.debug("Applying feature scaling")
         X_scaled = bundle.scaler.transform(X)
         X = pd.DataFrame(X_scaled, columns=X.columns)
     
     # Make prediction
     logger.info("Running prediction...")
-    logger.debug(f"Input features shape: {X.shape}")
-    logger.debug(f"Feature values (first row): {X.iloc[0].to_dict()}")
     prediction = bundle.model.predict(X)
     
     # Post-process based on model type
@@ -327,32 +339,10 @@ def run_inference(
     }
     
     if model_type == 'probability':
-        # Model predicts daily trip count, convert to instantaneous probability
-        # Using UNIFORM DISTRIBUTION (trips distributed evenly over 24 hours)
+        # Model predicts daily trip count directly
         n_trips_daily = float(prediction[0])
         result['n_trips_daily'] = n_trips_daily
-        
-        # Simple uniform distribution: divide daily trips by minutes in a day
-        # Assumes trips are evenly distributed (honest approach without time-of-day data)
-        lambda_per_minute = n_trips_daily / (24 * 60)  # trips per minute
-        
-        # Probability at specific moment (1-minute window for practical purposes)
-        # This represents: "At time τ, what's the probability of finding a load?"
-        time_window_minutes = 1  # Instantaneous probability (1-minute granularity)
-        lambda_in_window = lambda_per_minute * time_window_minutes
-        
-        # Apply Poisson probability formula: P(≥1 arrival) = 1 - exp(-λ)
-        probability = 1 - np.exp(-lambda_in_window)
-        
-        result['probability'] = float(probability)
-        result['lambda_per_minute'] = float(lambda_per_minute)
-        result['time_window_minutes'] = time_window_minutes
-        
-        if elapsed_time is not None:
-            result['elapsed_time_minutes'] = elapsed_time
-            result['interpretation'] = f"{result['probability']:.1%} instantaneous probability of loads at τ={elapsed_time}min on this route (based on {n_trips_daily:.1f} daily trips, uniform distribution)"
-        else:
-            result['interpretation'] = f"{result['probability']:.1%} instantaneous probability of loads on this route (based on {n_trips_daily:.1f} daily trips, uniform distribution)"
+        result['interpretation'] = f"Predicted {n_trips_daily:.2f} daily trips on this route"
     elif model_type == 'price':
         # If model was log-transformed, reverse it
         if bundle.encoders.get('log_transformed', False):
@@ -360,7 +350,7 @@ def run_inference(
             result['price_eur'] = float(actual_price)
         else:
             result['price_eur'] = float(prediction[0])
-        result['interpretation'] = f"Estimated price: €{result['price_eur']:.2f}"
+        result['interpretation'] = f"Estimated price: EUR {result['price_eur']:.2f}"
     elif model_type == 'weight':
         if bundle.encoders.get('log_transformed', False):
             actual_weight = np.expm1(prediction[0])
@@ -476,14 +466,13 @@ Examples:
         print("\n" + "="*60)
         print("PREDICTION RESULTS")
         print("="*60)
-        print(f"Route: {result['origin_id']} → {result['destination_id']}")
+        print(f"Route: {result['origin_id']} -> {result['destination_id']}")
         print(f"Date: {result['date']}")
         print(f"Truck type: {result['truck_type']}")
         print(f"Merchandise: {result['tipo_mercancia']}")
         print(f"Model: {result['model_type']}")
         print("-"*60)
-        print(f"✓ {result['interpretation']}")
-        print(f"  Raw prediction: {result['raw_prediction']:.6f}")
+        print(f"[OK] {result['interpretation']}")
         print("="*60 + "\n")
         
     except Exception as e:
