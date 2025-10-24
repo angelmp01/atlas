@@ -70,49 +70,22 @@ class ModelConfig(BaseModel):
 
 
 class FeatureConfig(BaseModel):
-    """Configuration for feature engineering."""
+    """Configuration for feature engineering.
     
-    # Time binning
-    tau_bin_minutes: int = Field(
-        default=10,
-        description="Time bin size in minutes for elapsed time discretization"
-    )
-    max_tau_hours: int = Field(
-        default=24,
-        description="Maximum elapsed time to consider in hours"
-    )
+    Simplified feature configuration for Regime B with uniform distribution.
+    Only includes essential parameters for basic feature engineering.
+    """
     
-    # Rolling window sizes for historical aggregates (in days)
-    rolling_windows: List[int] = Field(
-        default=[7, 14, 28],
-        description="Rolling window sizes for historical features"
-    )
-    
-    # Distance thresholds for density features (in km)
-    density_radii: List[float] = Field(
-        default=[25.0, 50.0],
-        description="Distance radii for destination density features"
-    )
-    
-    # Target encoding parameters
-    min_samples_leaf: int = Field(
-        default=10,
-        description="Minimum samples for target encoding categories"
-    )
-    smoothing: float = Field(
-        default=1.0,
-        description="Smoothing factor for target encoding"
-    )
+    # No configuration needed - all features are derived from base data
+    # (temporal, geographic, categorical) without historical aggregations
+    pass
 
 
 class TrainingConfig(BaseModel):
     """Configuration for training procedures."""
     
-    # Probability training regime
-    training_regime: str = Field(
-        default="regime_b",
-        description="Training regime: 'regime_a' (bin-level) or 'regime_b' (daily counts)"
-    )
+    # NOTE: Only Regime B supported (daily counts + uniform distribution)
+    # Regime A (time-binned) has been removed
     
     # Temporal cross-validation
     cv_months_train: int = Field(
@@ -122,22 +95,6 @@ class TrainingConfig(BaseModel):
     cv_months_test: int = Field(
         default=1,
         description="Number of months to use for testing in temporal CV"
-    )
-    
-    # Date filtering
-    start_date: Optional[str] = Field(
-        default=None,
-        description="Start date for training data (YYYY-MM-DD)"
-    )
-    end_date: Optional[str] = Field(
-        default=None,
-        description="End date for training data (YYYY-MM-DD)"
-    )
-    
-    # Probability specific
-    wait_tolerance_minutes: int = Field(
-        default=30,
-        description="Additional wait time W for probability calculation"
     )
 
 

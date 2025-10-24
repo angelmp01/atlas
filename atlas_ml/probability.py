@@ -59,176 +59,16 @@ class CandidateOutput:
     exp_weight: float           # Expected weight (kg)
 
 
-class ShapeFunctionLearner:
-    """
-    Learns the time distribution shape function for Regime B.
-    
-    In Regime B, we estimate daily trip counts and then distribute them across
-    time bins using a learned shape function f(τ_bin | features).
-    """
-    
-    def __init__(self, config: Config):
-        """
-        Initialize shape function learner.
-        
-        Args:
-            config: Configuration object
-        """
-        self.config = config
-        self.model = None
-        self.feature_builder = None
-        self.total_bins = (config.features.max_tau_hours * 60) // config.features.tau_bin_minutes
-    
-    def fit(self, df: pd.DataFrame) -> None:
-        """
-        Learn the shape function from historical data.
-        
-        This creates synthetic pseudo-proportions by analyzing historical
-        patterns across distance deciles and day-of-week combinations.
-        
-        Args:
-            df: DataFrame with historical load data
-        """
-        logger.info("Learning time distribution shape function")
-        
-        # Create distance deciles
-        df = df.copy()
-        df['distance_decile'] = pd.qcut(
-            df['od_length_km'], 
-            q=10, 
-            labels=False, 
-            duplicates='drop'
-        ).fillna(5)  # Default to middle decile
-        
-        # Create synthetic bin data
-        shape_data = []
-        
-        for _, group in df.groupby(['distance_decile', 'day_of_week']):
-            if len(group) < 10:  # Skip small groups
-                continue
-            
-            # Create probabilistic distribution based on distance and day patterns
-            # This is a simplified heuristic - replace with domain knowledge if available
-            tau_bins = np.arange(self.total_bins)
-            
-            # Distance-based pattern: shorter trips peak earlier
-            distance_factor = group['distance_decile'].iloc[0]
-            peak_bin = int(self.total_bins * (0.2 + 0.6 * distance_factor / 9))
-            
-            # Day-of-week pattern: weekends different from weekdays
-            dow_factor = 1.0 if group['day_of_week'].iloc[0] < 5 else 0.7
-            
-            # Create bell-curve like distribution
-            shape_weights = np.exp(-0.5 * ((tau_bins - peak_bin) / (self.total_bins / 6)) ** 2)
-            shape_weights *= dow_factor
-            shape_weights /= shape_weights.sum()  # Normalize to probabilities
-            
-            # Create training samples
-            for bin_idx, weight in enumerate(shape_weights):
-                if weight > 0.001:  # Skip very low probability bins
-                    shape_data.append({
-                        'distance_decile': distance_factor,
-                        'day_of_week': group['day_of_week'].iloc[0],
-                        'tau_bin': bin_idx,
-                        'shape_weight': weight,
-                        'holiday_flag': group['holiday_flag'].iloc[0] if 'holiday_flag' in group else 0
-                    })
-        
-        if not shape_data:
-            logger.warning("No data available for shape function learning. Using uniform distribution.")
-            self._create_uniform_model()
-            return
-        
-        shape_df = pd.DataFrame(shape_data)
-        
-        # Train multinomial model for shape function
-        features = ['distance_decile', 'day_of_week', 'holiday_flag']
-        X = shape_df[features]
-        
-        # Convert to multinomial classification problem
-        # Each time bin is a class, weighted by shape_weight
-        y_multinomial = []
-        sample_weights = []
-        
-        for _, row in shape_df.iterrows():
-            y_multinomial.append(row['tau_bin'])
-            sample_weights.append(row['shape_weight'])
-        
-        y_multinomial = np.array(y_multinomial)
-        sample_weights = np.array(sample_weights)
-        
-        # Train model
-        if HAS_XGBOOST and self.config.model.probability_model_type == 'xgboost':
-            self.model = xgb.XGBClassifier(
-                objective='multi:softprob',
-                n_estimators=50,  # Simpler model for shape function
-                max_depth=4,
-                random_state=self.config.random_state
-            )
-        else:
-            self.model = RandomForestClassifier(
-                n_estimators=50,
-                max_depth=8,
-                random_state=self.config.random_state
-            )
-        
-        self.model.fit(X, y_multinomial, sample_weight=sample_weights)
-        logger.info(f"Trained shape function on {len(shape_df)} samples")
-    
-    def predict_shape(self, distance_decile: int, day_of_week: int, holiday_flag: int = 0) -> np.ndarray:
-        """
-        Predict time distribution shape for given conditions.
-        
-        Args:
-            distance_decile: Distance decile (0-9)
-            day_of_week: Day of week (0-6)
-            holiday_flag: Holiday flag (0/1)
-            
-        Returns:
-            Array of probabilities for each time bin (sums to 1)
-        """
-        if self.model is None:
-            # Fallback: uniform distribution
-            return np.ones(self.total_bins) / self.total_bins
-        
-        X = np.array([[distance_decile, day_of_week, holiday_flag]])
-        
-        try:
-            shape_probs = self.model.predict_proba(X)[0]
-            
-            # Ensure we have probabilities for all bins
-            if len(shape_probs) < self.total_bins:
-                # Pad with small values
-                padded_probs = np.zeros(self.total_bins)
-                padded_probs[:len(shape_probs)] = shape_probs
-                padded_probs[len(shape_probs):] = 1e-6
-                shape_probs = padded_probs
-            
-            # Normalize
-            shape_probs = shape_probs / shape_probs.sum()
-            return shape_probs
-            
-        except Exception as e:
-            logger.warning(f"Shape function prediction failed: {e}. Using uniform distribution.")
-            return np.ones(self.total_bins) / self.total_bins
-    
-    def _create_uniform_model(self) -> None:
-        """Create a dummy model that returns uniform distribution."""
-        class UniformModel:
-            def predict_proba(self, X):
-                n_samples = X.shape[0]
-                n_bins = (24 * 60) // 10  # Default bin count
-                return np.ones((n_samples, n_bins)) / n_bins
-        
-        self.model = UniformModel()
+# NOTE: ShapeFunctionLearner removed - using uniform distribution for Regime B
+# No temporal shape function needed without real tau_minutes data
 
 
 class ProbabilityEstimator:
     """
-    Main class for probability estimation with support for both training regimes.
+    Probability estimation for Regime B only (daily counts + uniform distribution).
     
-    Regime A: Train directly on time-binned data with binary labels
-    Regime B: Train daily count model + shape function, then compute π = 1 - exp(-λW)
+    Predicts daily trip counts and converts to instantaneous probability using:
+    P(≥1 load) = 1 - exp(-λ) where λ = n_trips_daily / (24 * 60)
     """
     
     def __init__(self, config: Config):
@@ -239,9 +79,7 @@ class ProbabilityEstimator:
             config: Configuration object
         """
         self.config = config
-        self.regime = config.training.training_regime
         self.model = None
-        self.shape_learner = None
         self.feature_builder = None
         self.scaler = StandardScaler()
         
@@ -379,9 +217,9 @@ class ProbabilityEstimator:
         X_train = X_scaled.drop(columns=['date'], errors='ignore')
         self.model.fit(X_train, y)
         
-        # Train shape function
-        self.shape_learner = ShapeFunctionLearner(self.config)
-        self.shape_learner.fit(df)
+        # NOTE: Shape function disabled - no temporal data available
+        # Using uniform distribution instead (honest approach without real tau_minutes data)
+        self.shape_learner = None
         
         # Store feature names
         self.feature_names = list(X_train.columns)
@@ -444,38 +282,17 @@ class ProbabilityEstimator:
             daily_rates = self.model.predict(X_scaled)
             daily_rates = np.maximum(daily_rates, 0)  # Ensure non-negative
             
-            # Convert to time-bin rates using shape function
+            # Convert to instantaneous probabilities (uniform distribution)
+            # No shape function - using honest uniform distribution
             probabilities = []
-            W = self.config.training.wait_tolerance_minutes  # Additional wait time
             
-            for i, (rate, candidate) in enumerate(zip(daily_rates, candidates)):
-                # Get distance decile (approximate)
-                distance_decile = min(9, int(df_features.loc[i, 'od_length_km'] / 50))  # 50km per decile
+            for rate in daily_rates:
+                # Rate per minute (uniform distribution over 24 hours)
+                lambda_per_minute = rate / (24 * 60)
                 
-                # Get shape distribution
-                shape_probs = self.shape_learner.predict_shape(
-                    distance_decile, candidate.day_of_week, candidate.holiday_flag
-                )
-                
-                # Convert tau to bin
-                tau_bin = to_tau_bin(candidate.tau_minutes, self.config.features.tau_bin_minutes)
-                tau_bin = min(tau_bin, len(shape_probs) - 1)
-                
-                # Rate for this specific time bin
-                bin_rate = rate * shape_probs[tau_bin]
-                
-                # Add wait tolerance: rate over (current_bin + wait_time_bins)
-                wait_bins = W // self.config.features.tau_bin_minutes
-                total_rate = 0
-                for j in range(tau_bin, min(tau_bin + wait_bins + 1, len(shape_probs))):
-                    total_rate += rate * shape_probs[j]
-                
-                # Convert to probability: π = 1 - exp(-λ * 1) where λ is rate per time unit
-                # Here we assume rate is per day, convert to rate per bin_duration
-                bin_duration_days = self.config.features.tau_bin_minutes / (24 * 60)
-                effective_rate = total_rate * bin_duration_days
-                
-                probability = 1 - np.exp(-effective_rate)
+                # Instantaneous probability (1-minute window)
+                # P(≥1 arrival in 1 minute) = 1 - exp(-λ)
+                probability = 1 - np.exp(-lambda_per_minute)
                 probabilities.append(probability)
             
             probabilities = np.array(probabilities)
