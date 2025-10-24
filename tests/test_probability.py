@@ -1,7 +1,17 @@
 """
 Test suite for probability estimation module.
 
-Tests the probability models for π_{i→d}(τ) including both Regime A and Regime B training.
+⚠️ TESTS OUTDATED - NEED UPDATE ⚠️
+These tests reference deprecated 'Regime A/B' concepts and ShapeFunctionLearner.
+After simplification to single training path, tests need to be rewritten.
+
+TODO: Update tests to reflect current implementation:
+- Daily trip count prediction
+- Uniform distribution approach
+- No shape function
+- No regime selection
+
+Tests the probability models for π_{i→d}(τ).
 Uses synthetic data for testing to ensure independence from database.
 """
 
