@@ -117,144 +117,6 @@ class FeatureBuilder:
                         df[f"{col}_encoded"] = 0  # Default value
         
         return df
-    
-    def create_target_encoded_features(
-        self, 
-        df: pd.DataFrame, 
-        target_col: str,
-        categorical_cols: List[str],
-        fit: bool = True
-    ) -> pd.DataFrame:
-        """
-        Create target-encoded features for high-cardinality categoricals.
-        
-        Args:
-            df: Input dataframe
-            target_col: Target column for encoding
-            categorical_cols: List of categorical columns to encode
-            fit: Whether to fit encoders
-            
-        Returns:
-            DataFrame with target-encoded features
-        """
-        # Modify in place to save memory
-        
-        if target_col not in df.columns:
-            logger.warning(f"Target column {target_col} not found for target encoding")
-            return df
-        
-        for col in categorical_cols:
-            if col in df.columns:
-                encoded_col = f"{col}_target_encoded"
-                
-                if fit:
-                    df[encoded_col] = target_encode(
-                        df[col],
-                        df[target_col],
-                        min_samples_leaf=self.config.features.min_samples_leaf,
-                        smoothing=self.config.features.smoothing
-                    )
-                    
-                    # Store encoding mapping for inference
-                    encoding_map = df.groupby(col)[encoded_col].first().to_dict()
-                    self.encoders[f"{col}_target_map"] = encoding_map
-                    
-                else:
-                    # Apply stored encoding
-                    if f"{col}_target_map" in self.encoders:
-                        global_mean = df[target_col].mean() if target_col in df.columns else 0
-                        df[encoded_col] = df[col].map(self.encoders[f"{col}_target_map"]).fillna(global_mean)
-                    else:
-                        df[encoded_col] = 0
-        
-        return df
-    
-    def create_historical_features(self, df: pd.DataFrame, group_cols: List[str]) -> pd.DataFrame:
-        """
-        Create historical aggregation features.
-        
-        Args:
-            df: Input dataframe with date column
-            group_cols: Columns to group by for historical aggregates
-            
-        Returns:
-            DataFrame with historical features
-        """
-        if 'date' not in df.columns:
-            logger.warning("Date column not found for historical features")
-            return df
-        
-        # Modify in place to save memory
-        df['date'] = pd.to_datetime(df['date'])
-        
-        # Rolling features for trip counts
-        if 'n_trips' in df.columns:
-            df = create_rolling_features(
-                df, 'n_trips', group_cols, 
-                windows=self.config.features.rolling_windows
-            )
-        
-        # Rolling features for price
-        if 'precio' in df.columns:
-            df = create_rolling_features(
-                df, 'precio', group_cols,
-                windows=self.config.features.rolling_windows
-            )
-        
-        # Rolling features for weight
-        if 'peso' in df.columns:
-            df = create_rolling_features(
-                df, 'peso', group_cols,
-                windows=self.config.features.rolling_windows
-            )
-        
-        # Lag features
-        if 'n_trips' in df.columns:
-            df = create_lag_features(
-                df, 'n_trips', group_cols,
-                lags=[1, 7, 14]
-            )
-        
-        return df
-    
-    def create_density_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Create destination density features.
-        
-        These features count the number of destinations reachable from an origin
-        that are within certain distance radii of the reference destination.
-        
-        Args:
-            df: Input dataframe with origin_id, destination coordinates
-            
-        Returns:
-            DataFrame with density features added
-        """
-        if not all(col in df.columns for col in ['origin_id', 'destination_lat', 'destination_lon']):
-            logger.warning("Required columns for density features not found")
-            return df
-        
-        # Modify in place to save memory
-        
-        for radius in self.config.features.density_radii:
-            density_col = f"destinations_within_{int(radius)}km"
-            df[density_col] = 0
-            
-            # This is computationally expensive - consider caching or pre-computing
-            for idx, row in df.iterrows():
-                try:
-                    dest_ids = self.db.get_od_pairs_in_radius(
-                        row['origin_id'],
-                        row['destination_lat'],
-                        row['destination_lon'],
-                        radius
-                    )
-                    df.loc[idx, density_col] = len(dest_ids)
-                except Exception as e:
-                    logger.warning(f"Failed to compute density for row {idx}: {e}")
-                    df.loc[idx, density_col] = 0
-        
-        return df
 
 
 class ProbabilityFeatureBuilder(FeatureBuilder):
@@ -263,61 +125,35 @@ class ProbabilityFeatureBuilder(FeatureBuilder):
     def build_features(
         self,
         df: pd.DataFrame,
-        include_tau: bool = True,
+        include_tau: bool = False,  # Not used anymore, kept for compatibility
         fit: bool = True
     ) -> pd.DataFrame:
         """
-        Build features for probability estimation.
+        Build features for probability estimation (simplified).
+        
+        Only creates simple features: temporal, geographic, categorical.
+        No historical aggregations, no tau features, no DB queries.
         
         Args:
             df: Input dataframe
-            include_tau: Whether to include tau (elapsed time) features
+            include_tau: DEPRECATED (not used, kept for compatibility)
             fit: Whether to fit encoders
             
         Returns:
             DataFrame with probability model features
         """
-        logger.info("Building features for probability estimation")
+        logger.info("Building features for probability estimation (simplified)")
         logger.info(f"Starting feature engineering on {len(df):,} rows...")
         
-        # Base features
-        logger.info("[1/6] Creating base features (time, distance, etc.)...")
+        # Base features (temporal, geographic)
+        logger.info("[1/2] Creating base features (time, distance, etc.)...")
         df = self.create_base_features(df)
         
         # Categorical encoding
-        logger.info("[2/6] Encoding categorical features...")
+        logger.info("[2/2] Encoding categorical features...")
         df = self.create_categorical_features(df, fit=fit)
         
-        # Target encoding for origin-destination pairs
-        if 'n_trips' in df.columns:
-            logger.info("[3/6] Creating target-encoded features for OD pairs...")
-            df = self.create_target_encoded_features(
-                df, 'n_trips', ['origin_id', 'destination_id'], fit=fit
-            )
-        
-        # Historical features
-        logger.info("[4/6] Computing historical rolling features...")
-        df = self.create_historical_features(df, ['origin_id', 'destination_id'])
-        
-        # Tau (elapsed time) features
-        if include_tau and 'tau_minutes' in df.columns:
-            logger.info("[5/6] Creating elapsed time (tau) features...")
-            df['tau_bin'] = df['tau_minutes'].apply(
-                lambda x: to_tau_bin(x, self.config.features.tau_bin_minutes)
-            )
-            
-            # Tau-based features
-            df['tau_hour'] = df['tau_minutes'] / 60.0
-            df['tau_normalized'] = df['tau_minutes'] / (self.config.features.max_tau_hours * 60)
-            
-            # Interaction with day of week
-            if 'day_of_week' in df.columns:
-                df['tau_dow_interaction'] = df['tau_bin'] * df['day_of_week']
-        
-        # Density features (optional, expensive)
-        # df = self.create_density_features(df)
-        
-        logger.info("[6/6] Feature engineering completed!")
+        logger.info("Feature engineering completed!")
         logger.info(f"Final dataset shape: {df.shape[0]:,} rows x {df.shape[1]} columns")
         
         return df
@@ -335,6 +171,9 @@ class RegressionFeatureBuilder(FeatureBuilder):
         """
         Build features for regression models (price/weight).
         
+        Simplified: only base features + categorical encoding.
+        Historical features removed for now.
+        
         Args:
             df: Input dataframe
             target_col: Target column name ('precio' or 'peso')
@@ -350,15 +189,6 @@ class RegressionFeatureBuilder(FeatureBuilder):
         
         # Categorical encoding
         df = self.create_categorical_features(df, fit=fit)
-        
-        # Target encoding
-        if target_col in df.columns:
-            df = self.create_target_encoded_features(
-                df, target_col, ['origin_id', 'destination_id'], fit=fit
-            )
-        
-        # Historical features
-        df = self.create_historical_features(df, ['origin_id', 'destination_id'])
         
         # Distance-based features
         if 'od_length_km' in df.columns:
@@ -381,10 +211,9 @@ class RegressionFeatureBuilder(FeatureBuilder):
 
 def build_probability_dataset(config: Config) -> pd.DataFrame:
     """
-    Build complete dataset for probability training.
+    Build complete dataset for probability training (Regime B only).
     
-    This is a convenience function that combines data loading and feature engineering
-    for probability models. It handles both Regime A and Regime B training data.
+    Loads daily aggregated trip data and builds simple features.
     
     Args:
         config: Configuration object
@@ -394,40 +223,27 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
     """
     from .io import create_database_manager, create_dataset_builder
     
-    logger.info("Building probability dataset")
+    logger.info("Building probability dataset (Regime B: daily counts)")
     
     # Initialize data components
     db_manager = create_database_manager(config)
     dataset_builder = create_dataset_builder(config)
     feature_builder = ProbabilityFeatureBuilder(config, db_manager)
     
-    # Check training regime
-    if config.training.training_regime == "regime_a":
-        # Try to load time-binned data
-        df = db_manager.read_loads_with_time_bins(
-            config.training.start_date,
-            config.training.end_date
-        )
-        
-        if df.empty:
-            logger.warning("No time-binned data found, falling back to Regime B")
-            config.training.training_regime = "regime_b"
+    # Load base dataset (all 2024 data)
+    base_df = dataset_builder.build_base_dataset(
+        start_date='2024-01-01',
+        end_date='2024-12-31'
+    )
     
-    if config.training.training_regime == "regime_b" or df.empty:
-        # Load daily aggregated data
-        base_df = dataset_builder.build_base_dataset(
-            config.training.start_date,
-            config.training.end_date
-        )
-        
-        if base_df.empty:
-            raise ValueError("No training data found for specified date range")
-        
-        # Aggregate to daily level
-        df = dataset_builder.build_od_aggregates(base_df)
+    if base_df.empty:
+        raise ValueError("No training data found for 2024")
     
-    # Build features
-    df = feature_builder.build_features(df, include_tau=(config.training.training_regime == "regime_a"))
+    # Aggregate to daily level
+    df = dataset_builder.build_od_aggregates(base_df)
+    
+    # Build features (simplified: no tau, no historical)
+    df = feature_builder.build_features(df, include_tau=False)
     
     # Check for duplicate columns (critical for XGBoost)
     if df.columns.duplicated().any():
@@ -466,14 +282,14 @@ def build_price_dataset(config: Config) -> pd.DataFrame:
     dataset_builder = create_dataset_builder(config)
     feature_builder = RegressionFeatureBuilder(config, db_manager)
     
-    # Load base dataset
+    # Load base dataset (all 2024 data)
     base_df = dataset_builder.build_base_dataset(
-        config.training.start_date,
-        config.training.end_date
+        start_date='2024-01-01',
+        end_date='2024-12-31'
     )
     
     if base_df.empty:
-        raise ValueError("No training data found for specified date range")
+        raise ValueError("No training data found for 2024")
     
     # Filter out records with missing prices
     df = base_df[base_df['precio'].notna() & (base_df['precio'] > 0)].copy()
@@ -504,14 +320,14 @@ def build_weight_dataset(config: Config) -> pd.DataFrame:
     dataset_builder = create_dataset_builder(config)
     feature_builder = RegressionFeatureBuilder(config, db_manager)
     
-    # Load base dataset
+    # Load base dataset (all 2024 data)
     base_df = dataset_builder.build_base_dataset(
-        config.training.start_date,
-        config.training.end_date
+        start_date='2024-01-01',
+        end_date='2024-12-31'
     )
     
     if base_df.empty:
-        raise ValueError("No training data found for specified date range")
+        raise ValueError("No training data found for 2024")
     
     # Filter out records with missing weights
     df = base_df[base_df['peso'].notna() & (base_df['peso'] > 0)].copy()
