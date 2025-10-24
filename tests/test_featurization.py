@@ -1,8 +1,21 @@
 """
 Test suite for feature engineering module.
 
-Tests feature builders for probability, price, and weight models including
-historical aggregates, target encoding, and time-based features.
+⚠️ TESTS OUTDATED - NEED UPDATE ⚠️
+These tests reference deprecated historical features that were removed during simplification:
+- create_historical_features() (deleted)
+- create_target_encoded_features() (deleted)
+- create_density_features() (deleted)
+- Rolling window aggregations (removed)
+- Lag features (removed)
+- Target encoding (removed)
+
+TODO: Update tests to reflect current simplified implementation:
+- Only base features: temporal, geographic, categorical
+- No database-dependent features
+- No historical aggregations
+
+Tests feature builders for probability, price, and weight models.
 """
 
 import unittest

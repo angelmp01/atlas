@@ -1,6 +1,18 @@
 """
 Test suite for regression models (price and weight estimation).
 
+⚠️ TESTS PARTIALLY OUTDATED - NEED REVIEW ⚠️
+Some tests reference deprecated features that were removed during simplification:
+- rolling_windows config parameter (removed from FeatureConfig)
+- Historical aggregation features (removed)
+
+Most regression tests should still work as price/weight models were less affected
+by the regime simplification. However, review and update tests that fail.
+
+TODO: Update tests to reflect current simplified implementation:
+- Remove references to rolling_windows
+- Verify feature lists match current RegressionFeatureBuilder output
+
 Tests the regression models for E[price_{i→d}] and E[weight_{i→d}].
 Uses synthetic data for testing to ensure independence from database.
 """
