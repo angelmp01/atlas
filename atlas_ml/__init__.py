@@ -64,8 +64,7 @@ from .probability import (
     predict_probability,
     predict_all,
     train_probability,
-    ProbabilityEstimator,
-    ShapeFunctionLearner
+    ProbabilityEstimator
 )
 from .regressors import (
     predict_price, 
@@ -165,7 +164,6 @@ __all__ = [
     "ProbabilityEstimator",
     "PriceEstimator", 
     "WeightEstimator",
-    "ShapeFunctionLearner",
     "ProbabilityFeatureBuilder",
     "RegressionFeatureBuilder", 
     "TemporalSplitter",
