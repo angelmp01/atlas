@@ -75,6 +75,9 @@ CREATE INDEX sodd_locations_geom_gix ON app.sodd_locations USING GIST (geom);
 
 
 -- Tabla final de cargas (unión de raw + localizaciones para crear geom)
+-- NOTA: La tabla base sodd_loads contiene los datos originales del SpanishODData
+-- La vista materializada sodd_loads_logistics (creada externamente) contiene
+-- estimaciones logísticas con n_trips_logistic calculado a partir de volumen de camiones
 DROP TABLE IF EXISTS app.sodd_loads;
 CREATE TABLE app.sodd_loads (
   date                      date,

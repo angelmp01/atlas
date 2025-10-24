@@ -211,9 +211,10 @@ class RegressionFeatureBuilder(FeatureBuilder):
 
 def build_probability_dataset(config: Config) -> pd.DataFrame:
     """
-    Build complete dataset for probability training (Regime B only).
+    Build complete dataset for probability training.
     
     Loads daily aggregated trip data and builds simple features.
+    Uses uniform distribution approach (daily counts distributed evenly over 24 hours).
     
     Args:
         config: Configuration object
@@ -223,7 +224,7 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
     """
     from .io import create_database_manager, create_dataset_builder
     
-    logger.info("Building probability dataset (Regime B: daily counts)")
+    logger.info("Building probability dataset (daily counts with uniform distribution)")
     
     # Initialize data components
     db_manager = create_database_manager(config)

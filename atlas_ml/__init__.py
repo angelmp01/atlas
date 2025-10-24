@@ -10,9 +10,9 @@ This package provides machine learning capabilities for estimating:
 The package supports both training and inference modes for production use.
 
 Key Features:
-- Two training regimes for probability estimation (Regime A: bin-level, Regime B: daily counts)
+- Daily trip count prediction with uniform distribution for probability estimation
 - Temporal cross-validation for robust model evaluation
-- Feature engineering with historical aggregates and target encoding
+- Simple feature engineering (temporal, geographic, categorical)
 - Model serialization with versioning and metadata tracking
 - Clean separation of training and inference interfaces
 
@@ -32,7 +32,7 @@ Inference:
     from atlas_ml import CandidateInput, predict_all, load_bundle
     
     # Load trained models
-    prob_bundle = load_bundle("models/probability_regime_b_v20241022")
+    prob_bundle = load_bundle("models/probability_v20241024")
     
     # Define candidates
     candidates = [

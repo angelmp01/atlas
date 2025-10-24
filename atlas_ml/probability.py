@@ -4,7 +4,8 @@ Probability estimation module for ATLAS ML package.
 Implements models for π_{i→d}(τ): probability that at arrival (elapsed time τ since trip start)
 there is at least one available load from zone i to destination d.
 
-Supports both Regime A (bin-level training) and Regime B (daily counts + shape function).
+Uses daily trip count prediction with uniform distribution over 24 hours.
+Formula: P(≥1 load in 1 min) = 1 - exp(-λ) where λ = n_trips_daily / (24 * 60)
 """
 
 import logging
@@ -59,16 +60,18 @@ class CandidateOutput:
     exp_weight: float           # Expected weight (kg)
 
 
-# NOTE: ShapeFunctionLearner removed - using uniform distribution for Regime B
+# NOTE: ShapeFunctionLearner removed - using uniform distribution instead
 # No temporal shape function needed without real tau_minutes data
 
 
 class ProbabilityEstimator:
     """
-    Probability estimation for Regime B only (daily counts + uniform distribution).
+    Probability estimator using daily trip count prediction with uniform distribution.
     
     Predicts daily trip counts and converts to instantaneous probability using:
-    P(≥1 load) = 1 - exp(-λ) where λ = n_trips_daily / (24 * 60)
+    P(≥1 load in 1 min) = 1 - exp(-λ) where λ = n_trips_daily / (24 * 60)
+    
+    This approach assumes trips are uniformly distributed over 24 hours.
     """
     
     def __init__(self, config: Config):
@@ -104,7 +107,12 @@ class ProbabilityEstimator:
     
     def fit(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Train Regime B: daily counts with uniform distribution.
+        Train probability model using daily trip counts with uniform distribution.
+        
+        Approach:
+        1. Predict daily trip counts using XGBoost/RandomForest
+        2. Convert to instantaneous probability: P = 1 - exp(-λ) where λ = n_trips_daily/(24*60)
+        3. Assumes uniform distribution over 24 hours (simple, honest approach)
         
         Args:
             df: DataFrame with daily aggregated data (columns: n_trips_daily, ...)
@@ -112,14 +120,17 @@ class ProbabilityEstimator:
         Returns:
             Training results dictionary
         """
-        logger.info("Training probability model (Regime B: daily counts + uniform distribution)")
+        logger.info("Training probability model (daily counts + uniform distribution)")
         
         if 'n_trips_daily' not in df.columns:
-            # Try to use 'n_trips' as daily count
-            if 'n_trips' in df.columns:
+            # Try to use 'n_trips_logistic' as daily count (from sodd_loads_logistics)
+            if 'n_trips_logistic' in df.columns:
+                df['n_trips_daily'] = df['n_trips_logistic']
+            # Fallback to 'n_trips' for backward compatibility
+            elif 'n_trips' in df.columns:
                 df['n_trips_daily'] = df['n_trips']
             else:
-                raise ValueError("Regime B requires daily trip counts")
+                raise ValueError("Regime B requires daily trip counts (n_trips_daily, n_trips_logistic, or n_trips)")
         
         df = df.copy()
         
@@ -160,17 +171,16 @@ class ProbabilityEstimator:
         X_train = X_scaled.drop(columns=['date'], errors='ignore')
         self.model.fit(X_train, y)
         
-        # NOTE: Shape function disabled - no temporal data available
-        # Using uniform distribution instead (honest approach without real tau_minutes data)
+        # NOTE: No temporal shape function - using uniform distribution
+        # (honest approach without real time-of-day data)
         self.shape_learner = None
         
         # Store feature names
         self.feature_names = list(X_train.columns)
         
-        logger.info(f"Regime B training completed. MAE: {cv_results['overall_metrics'].get('mae', 'N/A'):.3f}")
+        logger.info(f"Training completed. MAE: {cv_results['overall_metrics'].get('mae', 'N/A'):.3f}")
         
         return {
-            'regime': 'regime_b',
             'cv_results': cv_results,
             'feature_names': self.feature_names,
             'training_samples': len(df)
@@ -216,12 +226,11 @@ class ProbabilityEstimator:
         X = df_features[self.feature_names].fillna(0)
         X_scaled = self.scaler.transform(X)
         
-        # Predict daily rates (Regime B)
+        # Predict daily trip counts
         daily_rates = self.model.predict(X_scaled)
         daily_rates = np.maximum(daily_rates, 0)  # Ensure non-negative
         
-        # Convert to instantaneous probabilities (uniform distribution)
-        # No shape function - using honest uniform distribution
+        # Convert to instantaneous probabilities (uniform distribution over 24 hours)
         probabilities = []
         
         for rate in daily_rates:

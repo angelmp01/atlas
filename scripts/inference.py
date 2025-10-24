@@ -117,7 +117,7 @@ def prepare_input_features(
                     AVG(volumen) as volumen_mean_daily,
                     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY volumen) as volumen_median_daily,
                     STDDEV(volumen) as volumen_std_daily
-                FROM app.sodd_loads
+                FROM app.sodd_loads_logistics
                 WHERE origin_id = :origin_id
                   AND destination_id = :destination_id
                   AND date < :ref_date  -- Use only historical data
@@ -327,13 +327,13 @@ def run_inference(
     }
     
     if model_type == 'probability':
-        # Regime B: model predicts daily trip count, convert to probability
-        # Using UNIFORM DISTRIBUTION (no shape function - no real temporal data available)
+        # Model predicts daily trip count, convert to instantaneous probability
+        # Using UNIFORM DISTRIBUTION (trips distributed evenly over 24 hours)
         n_trips_daily = float(prediction[0])
         result['n_trips_daily'] = n_trips_daily
         
         # Simple uniform distribution: divide daily trips by minutes in a day
-        # Assumes trips are evenly distributed (honest approach without temporal data)
+        # Assumes trips are evenly distributed (honest approach without time-of-day data)
         lambda_per_minute = n_trips_daily / (24 * 60)  # trips per minute
         
         # Probability at specific moment (1-minute window for practical purposes)
@@ -454,7 +454,7 @@ Examples:
         '--elapsed-time',
         type=int,
         default=None,
-        help='Elapsed time in minutes since trip start (for time-dependent probability, only for Regime B with shape function)'
+        help='Elapsed time in minutes since trip start (currently not used - uniform distribution assumed)'
     )
     
     args = parser.parse_args()

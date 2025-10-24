@@ -72,20 +72,23 @@ class ModelConfig(BaseModel):
 class FeatureConfig(BaseModel):
     """Configuration for feature engineering.
     
-    Simplified feature configuration for Regime B with uniform distribution.
-    Only includes essential parameters for basic feature engineering.
+    Simplified feature configuration using only basic features:
+    - Temporal features (day, week, month, quarter, holidays)
+    - Geographic features (OD distance, log distance)
+    - Categorical features (truck type, merchandise type)
+    
+    No historical aggregations or database-dependent features.
     """
     
     # No configuration needed - all features are derived from base data
-    # (temporal, geographic, categorical) without historical aggregations
     pass
 
 
 class TrainingConfig(BaseModel):
-    """Configuration for training procedures."""
+    """Configuration for training procedures.
     
-    # NOTE: Only Regime B supported (daily counts + uniform distribution)
-    # Regime A (time-binned) has been removed
+    Uses daily trip count prediction with uniform distribution approach.
+    """
     
     # Temporal cross-validation
     cv_months_train: int = Field(

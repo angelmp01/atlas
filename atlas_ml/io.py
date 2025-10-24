@@ -37,16 +37,16 @@ class SoddLocation(Base):
 
 
 class SoddLoad(Base):
-    """ORM model for app.sodd_loads table."""
+    """ORM model for app.sodd_loads_logistics table."""
     
-    __tablename__ = 'sodd_loads'
+    __tablename__ = 'sodd_loads_logistics'
     __table_args__ = {'schema': 'app'}
     
     id = Column(Integer, primary_key=True)
     date = Column(Date)
     origin_id = Column(Integer)
     destination_id = Column(Integer)
-    n_trips = Column(Integer)
+    n_trips_logistic = Column(Integer)
     trips_total_length_km = Column(Float)
     tipo_mercancia = Column(String)  # 'normal' or 'refrigerada'
     volumen = Column(Float)
@@ -131,7 +131,7 @@ class DatabaseManager:
                 l.date,
                 l.origin_id,
                 l.destination_id,
-                l.n_trips,
+                l.n_trips_logistic,
                 l.trips_total_length_km,
                 l.tipo_mercancia,
                 l.volumen,
@@ -143,7 +143,7 @@ class DatabaseManager:
                 ST_Y(ST_Transform(o.geom, 4326)) as origin_lat,
                 ST_X(ST_Transform(d.geom, 4326)) as destination_lon,
                 ST_Y(ST_Transform(d.geom, 4326)) as destination_lat
-            FROM app.sodd_loads l
+            FROM app.sodd_loads_logistics l
             JOIN app.sodd_locations o ON l.origin_id = o.location_id
             JOIN app.sodd_locations d ON l.destination_id = d.location_id
         """]
@@ -180,18 +180,17 @@ class DatabaseManager:
         end_date: Optional[str] = None
     ) -> pd.DataFrame:
         """
-        Read load data with time bin information (for Regime A training).
+        Read load data with time bin information.
         
-        This method assumes existence of time-binned data. If not available,
-        it will return empty DataFrame and training will fall back to Regime B.
+        DEPRECATED: Time-binned training is no longer supported.
+        This method is kept for backward compatibility but returns empty DataFrame.
         
         Args:
             start_date: Start date filter (YYYY-MM-DD)
             end_date: End date filter (YYYY-MM-DD)
             
         Returns:
-            DataFrame with columns: date, origin_id, destination_id, tau_bin, n_trips_bin
-            Returns empty DataFrame if time-binned data not available
+            Empty DataFrame (time-binned training deprecated)
         """
         # Check if time-binned table exists
         check_query = text("""
@@ -206,7 +205,7 @@ class DatabaseManager:
             table_exists = conn.execute(check_query).scalar()
         
         if not table_exists:
-            logger.warning("Time-binned load data not available. Using Regime B training.")
+            logger.warning("Time-binned load data not available (deprecated feature).")
             return pd.DataFrame()
         
         # Query time-binned data
@@ -265,7 +264,7 @@ class DatabaseManager:
         """
         query = text("""
             SELECT DISTINCT l.destination_id
-            FROM app.sodd_loads l
+            FROM app.sodd_loads_logistics l
             JOIN app.sodd_locations d ON l.destination_id = d.location_id
             WHERE l.origin_id = :origin_id
             AND ST_DWithin(
@@ -419,7 +418,7 @@ class DatasetBuilder:
         # Daily aggregates by (origin_id, destination_id)
         # Use 'first' instead of mode() for categorical - much faster and equivalent for most cases
         od_daily = df.groupby(['date', 'origin_id', 'destination_id']).agg({
-            'n_trips': 'sum',
+            'n_trips_logistic': 'sum',
             'precio': ['mean', 'median', 'std'],
             'peso': ['mean', 'median', 'std'],
             'volumen': ['mean', 'median', 'std'],
@@ -436,7 +435,7 @@ class DatasetBuilder:
             'date_': 'date',
             'origin_id_': 'origin_id',
             'destination_id_': 'destination_id',
-            'n_trips_sum': 'n_trips_daily',
+            'n_trips_logistic_sum': 'n_trips_daily',
             'precio_mean': 'precio_mean_daily',
             'precio_median': 'precio_median_daily',
             'precio_std': 'precio_std_daily',
