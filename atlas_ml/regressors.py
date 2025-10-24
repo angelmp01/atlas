@@ -185,6 +185,9 @@ class RegressionEstimator:
         if self.model is None:
             raise ValueError("Model not trained. Call fit() first.")
         
+        if self.feature_builder is None:
+            raise ValueError("Feature builder not initialized. Call fit() first.")
+        
         # Convert candidates to DataFrame
         candidate_data = []
         for c in candidates:
@@ -291,6 +294,9 @@ def train_price(config: Config) -> ModelBundle:
     bundle_path = version_manager.get_bundle_path('price')
     
     # Prepare artifacts
+    if estimator.feature_builder is None:
+        raise ValueError("Feature builder not initialized after training")
+    
     encoders = {
         'feature_builder_encoders': estimator.feature_builder.encoders,
         'scaler': estimator.scaler,
@@ -362,6 +368,9 @@ def train_weight(config: Config) -> ModelBundle:
     bundle_path = version_manager.get_bundle_path('weight')
     
     # Prepare artifacts
+    if estimator.feature_builder is None:
+        raise ValueError("Feature builder not initialized after training")
+    
     encoders = {
         'feature_builder_encoders': estimator.feature_builder.encoders,
         'scaler': estimator.scaler,
@@ -405,7 +414,8 @@ def predict_price(candidates: List[CandidateInput], bundle: ModelBundle) -> List
     # Load encoders and preprocessing
     encoders = bundle.encoders
     if 'feature_builder_encoders' in encoders:
-        feature_builder = RegressionFeatureBuilder(config, None)  # No DB needed for inference
+        from .io import create_database_manager
+        feature_builder = RegressionFeatureBuilder(config, create_database_manager(config))
         feature_builder.encoders = encoders['feature_builder_encoders']
         estimator.feature_builder = feature_builder
     
@@ -441,7 +451,8 @@ def predict_weight(candidates: List[CandidateInput], bundle: ModelBundle) -> Lis
     # Load encoders and preprocessing
     encoders = bundle.encoders
     if 'feature_builder_encoders' in encoders:
-        feature_builder = RegressionFeatureBuilder(config, None)  # No DB needed for inference
+        from .io import create_database_manager
+        feature_builder = RegressionFeatureBuilder(config, create_database_manager(config))
         feature_builder.encoders = encoders['feature_builder_encoders']
         estimator.feature_builder = feature_builder
     

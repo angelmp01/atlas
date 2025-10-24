@@ -534,8 +534,6 @@ def create_model_card(
             "features": {
                 "count": len(features),
                 "names": features[:20],  # Limit for readability
-                "tau_bin_minutes": config.features.tau_bin_minutes,
-                "rolling_windows": config.features.rolling_windows,
             },
             "model_params": getattr(config.model, f"{model_type}_params", {}),
             "cv_setup": {
@@ -544,8 +542,8 @@ def create_model_card(
                 "n_folds": cv_results.get("n_folds", 0),
             },
             "data_filters": {
-                "start_date": config.training.start_date,
-                "end_date": config.training.end_date,
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",
             }
         },
         

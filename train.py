@@ -185,9 +185,10 @@ Ejemplos de uso:
     logger.info("Cargando configuracion...")
     config = Config()
     
-    # Configurar regimen si es probability
-    config.training.training_regime = f'regime_{args.regime.lower()}'
-    logger.info(f"Regimen de entrenamiento: {config.training.training_regime}")
+    # Note: Regime is now hardcoded to B in probability.py
+    # args.regime is ignored (kept for CLI compatibility)
+    if args.regime.lower() != 'b':
+        logger.warning(f"Regime {args.regime} is not supported anymore. Using Regime B (only regime supported).")
     
     # Entrenar
     try:
