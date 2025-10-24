@@ -102,71 +102,9 @@ class ProbabilityEstimator:
             else:
                 return RandomForestRegressor(**self.config.model.rf_params)
     
-    def fit_regime_a(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def fit(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Train Regime A: direct time-bin classification.
-        
-        Args:
-            df: DataFrame with time-binned data (columns: tau_bin, n_trips_bin, ...)
-            
-        Returns:
-            Training results dictionary
-        """
-        logger.info("Training Regime A: time-bin classification")
-        
-        # Create binary labels (1 if n_trips_bin >= 1, 0 otherwise)
-        if 'n_trips_bin' not in df.columns:
-            raise ValueError("Regime A requires 'n_trips_bin' column")
-        
-        df = df.copy()
-        df['has_load'] = (df['n_trips_bin'] >= 1).astype(int)
-        
-        # Build features
-        self.feature_builder = ProbabilityFeatureBuilder(self.config, create_database_manager(self.config))
-        df_features = self.feature_builder.build_features(df, include_tau=True, fit=True)
-        
-        # Prepare training data
-        feature_columns = [col for col in df_features.columns 
-                          if col not in ['date', 'has_load', 'n_trips_bin', 'origin_id', 'destination_id']]
-        
-        X = df_features[feature_columns].fillna(0)
-        y = df_features['has_load']
-        
-        # Scale features
-        X_scaled = self.scaler.fit_transform(X)
-        X_scaled = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
-        
-        # Train model
-        self.model = self._create_model(self.config.model.probability_model_type, is_classifier=True)
-        
-        # Cross-validation
-        cv = CrossValidator(self.config)
-        cv_results = cv.cross_validate_classifier(
-            type(self.model), 
-            self.model.get_params(),
-            X_scaled.assign(date=df_features['date']),
-            y
-        )
-        
-        # Final training on all data
-        X_train = X_scaled.drop(columns=['date'], errors='ignore')
-        self.model.fit(X_train, y)
-        
-        # Store feature names
-        self.feature_names = list(X_train.columns)
-        
-        logger.info(f"Regime A training completed. ROC-AUC: {cv_results['overall_metrics'].get('roc_auc', 'N/A'):.3f}")
-        
-        return {
-            'regime': 'regime_a',
-            'cv_results': cv_results,
-            'feature_names': self.feature_names,
-            'training_samples': len(df)
-        }
-    
-    def fit_regime_b(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """
-        Train Regime B: daily counts + shape function.
+        Train Regime B: daily counts with uniform distribution.
         
         Args:
             df: DataFrame with daily aggregated data (columns: n_trips_daily, ...)
@@ -174,7 +112,7 @@ class ProbabilityEstimator:
         Returns:
             Training results dictionary
         """
-        logger.info("Training Regime B: daily counts + shape function")
+        logger.info("Training probability model (Regime B: daily counts + uniform distribution)")
         
         if 'n_trips_daily' not in df.columns:
             # Try to use 'n_trips' as daily count
@@ -246,6 +184,9 @@ class ProbabilityEstimator:
         if self.model is None:
             raise ValueError("Model not trained. Call fit() first.")
         
+        if self.feature_builder is None:
+            raise ValueError("Feature builder not initialized. Call fit() first or set feature_builder manually.")
+        
         # Convert candidates to DataFrame
         candidate_data = []
         for c in candidates:
@@ -263,39 +204,31 @@ class ProbabilityEstimator:
         
         df = pd.DataFrame(candidate_data)
         
-        # Build features
-        if self.regime == 'regime_a':
-            df_features = self.feature_builder.build_features(df, include_tau=True, fit=False)
-        else:
-            df_features = self.feature_builder.build_features(df, include_tau=False, fit=False)
+        # Build features (no tau, no historical features)
+        df_features = self.feature_builder.build_features(df, include_tau=False, fit=False)
         
         # Prepare prediction data
         X = df_features[self.feature_names].fillna(0)
         X_scaled = self.scaler.transform(X)
         
-        if self.regime == 'regime_a':
-            # Direct probability prediction
-            probabilities = self.model.predict_proba(X_scaled)[:, 1]
+        # Predict daily rates (Regime B)
+        daily_rates = self.model.predict(X_scaled)
+        daily_rates = np.maximum(daily_rates, 0)  # Ensure non-negative
         
-        else:  # regime_b
-            # Predict daily rates
-            daily_rates = self.model.predict(X_scaled)
-            daily_rates = np.maximum(daily_rates, 0)  # Ensure non-negative
+        # Convert to instantaneous probabilities (uniform distribution)
+        # No shape function - using honest uniform distribution
+        probabilities = []
+        
+        for rate in daily_rates:
+            # Rate per minute (uniform distribution over 24 hours)
+            lambda_per_minute = rate / (24 * 60)
             
-            # Convert to instantaneous probabilities (uniform distribution)
-            # No shape function - using honest uniform distribution
-            probabilities = []
-            
-            for rate in daily_rates:
-                # Rate per minute (uniform distribution over 24 hours)
-                lambda_per_minute = rate / (24 * 60)
-                
-                # Instantaneous probability (1-minute window)
-                # P(≥1 arrival in 1 minute) = 1 - exp(-λ)
-                probability = 1 - np.exp(-lambda_per_minute)
-                probabilities.append(probability)
-            
-            probabilities = np.array(probabilities)
+            # Instantaneous probability (1-minute window)
+            # P(≥1 arrival in 1 minute) = 1 - exp(-λ)
+            probability = 1 - np.exp(-lambda_per_minute)
+            probabilities.append(probability)
+        
+        probabilities = np.array(probabilities)
         
         # Clamp probabilities to [0, 1]
         probabilities = [clamp_probability(p) for p in probabilities]
@@ -331,23 +264,20 @@ def train_probability(config: Config) -> ModelBundle:
     # Initialize estimator
     estimator = ProbabilityEstimator(config)
     
-    # Train based on regime
-    if config.training.training_regime == 'regime_a':
-        training_results = estimator.fit_regime_a(df)
-    else:
-        training_results = estimator.fit_regime_b(df)
+    # Train Regime B (only regime supported)
+    training_results = estimator.fit(df)
     
     # Create model card
     model_card = create_model_card(
         model_type=config.model.probability_model_type,
         task_type="probability",
-        training_regime=config.training.training_regime,
+        training_regime='regime_b',
         features=estimator.feature_names,
         cv_results=training_results['cv_results'],
         config=config,
         additional_info={
             'training_samples': training_results['training_samples'],
-            'regime_explanation': training_results['regime']
+            'regime_explanation': 'regime_b'
         }
     )
     
@@ -356,17 +286,17 @@ def train_probability(config: Config) -> ModelBundle:
     version_manager = ModelVersionManager(config.paths.models_dir)
     bundle_path = version_manager.get_bundle_path(
         'probability',
-        training_regime=config.training.training_regime
+        training_regime='regime_b'
     )
     
     # Prepare artifacts
+    if estimator.feature_builder is None:
+        raise ValueError("Feature builder not initialized after training")
+    
     encoders = {
         'feature_builder_encoders': estimator.feature_builder.encoders,
         'scaler': estimator.scaler
     }
-    
-    if estimator.shape_learner:
-        encoders['shape_learner'] = estimator.shape_learner
     
     bundle = save_model_bundle(
         model=estimator.model,
@@ -376,7 +306,7 @@ def train_probability(config: Config) -> ModelBundle:
         model_path=bundle_path,
         encoders=encoders,
         metadata=model_card,
-        training_regime=config.training.training_regime,
+        training_regime='regime_b',
         config=config
     )
     
@@ -402,20 +332,17 @@ def predict_probability(candidates: List[CandidateInput], bundle: ModelBundle) -
     # Load model components
     estimator.model = bundle.model
     estimator.feature_names = bundle.features
-    estimator.regime = bundle.training_regime or 'regime_b'
     
     # Load encoders
     encoders = bundle.encoders
     if 'feature_builder_encoders' in encoders:
-        feature_builder = ProbabilityFeatureBuilder(config, None)  # No DB needed for inference
+        from .io import create_database_manager
+        feature_builder = ProbabilityFeatureBuilder(config, create_database_manager(config))
         feature_builder.encoders = encoders['feature_builder_encoders']
         estimator.feature_builder = feature_builder
     
     if 'scaler' in encoders:
         estimator.scaler = encoders['scaler']
-    
-    if 'shape_learner' in encoders:
-        estimator.shape_learner = encoders['shape_learner']
     
     # Predict
     return estimator.predict_probability(candidates)
