@@ -176,7 +176,7 @@ class DatabaseManager:
         # Convert date column
         df['date'] = pd.to_datetime(df['date'])
         
-        logger.info(f"✓ Loaded {len(df):,} load records from database")
+        logger.info(f"[OK] Loaded {len(df):,} load records from database")
         return df
     
     def read_loads_with_time_bins(
@@ -406,7 +406,7 @@ class DatasetBuilder:
                 else row['od_length_km'],
                 axis=1
             )
-            logger.info("✓ Normalized od_length_km by dividing trips_total_length_km by n_trips")
+            logger.info("[OK] Normalized od_length_km by dividing trips_total_length_km by n_trips")
         
         logger.info("Adding time features (day_of_week, week_of_year, etc.)...")
         
@@ -422,7 +422,7 @@ class DatasetBuilder:
             'normal': 'normal'
         }).fillna('normal')
         
-        logger.info(f"✓ Base dataset complete: {len(df):,} records with {len(df.columns)} features")
+        logger.info(f"[OK] Base dataset complete: {len(df):,} records with {len(df.columns)} features")
         
         if export_parquet:
             self.db.export_to_parquet(df, "base_loads_dataset")
@@ -483,7 +483,7 @@ class DatasetBuilder:
         
         od_daily = od_daily.rename(columns=rename_dict)
         
-        logger.info(f"Step 3/3: ✓ Aggregation completed - {len(od_daily):,} daily OD pairs created")
+        logger.info(f"Step 3/3: [OK] Aggregation completed - {len(od_daily):,} daily OD pairs created")
         
         return od_daily
 

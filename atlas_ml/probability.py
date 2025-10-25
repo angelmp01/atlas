@@ -96,7 +96,8 @@ class ProbabilityEstimator:
                 return xgb.XGBClassifier(**params)
             else:
                 params = self.config.model.xgb_params.copy()
-                params['objective'] = 'count:poisson'
+                # Use squared error for log-transformed target
+                params['objective'] = 'reg:squarederror'
                 return xgb.XGBRegressor(**params)
         else:
             if is_classifier:
@@ -114,7 +115,7 @@ class ProbabilityEstimator:
         3. Assumes uniform distribution over 24 hours (simple, honest approach)
         
         Target variable source:
-        - Primary: n_trips_logistic from app.sodd_loads_logistics (freight vehicle count estimate)
+        - Primary: n_trips_logistic from app.sodd_loads_filtered (freight vehicle count estimate)
         - This represents the estimated number of freight transport vehicles per OD pair per day
         
         Args:
@@ -127,7 +128,7 @@ class ProbabilityEstimator:
         logger.info("Target variable: n_trips_logistic (freight vehicle count from database)")
         
         if 'n_trips_daily' not in df.columns:
-            # Primary source: n_trips_logistic from sodd_loads_logistics table
+            # Primary source: n_trips_logistic from sodd_loads_filtered table
             if 'n_trips_logistic' in df.columns:
                 df['n_trips_daily'] = df['n_trips_logistic']
                 logger.info(f"Using n_trips_logistic as target (range: {df['n_trips_daily'].min():.0f} - {df['n_trips_daily'].max():.0f})")
@@ -149,12 +150,19 @@ class ProbabilityEstimator:
         feature_columns = [col for col in df_features.columns if col not in excluded_cols]
         
         X = df_features[feature_columns].fillna(0)
-        y = df_features['n_trips_daily'].clip(lower=0)  # Ensure non-negative
+        y_raw = df_features['n_trips_daily'].clip(lower=0)  # Ensure non-negative
+        
+        # Log-transform target to handle heavy-tailed distribution (75% < 1, 0.03% > 500)
+        # This allows model to learn both low and high trip counts effectively
+        y = np.log1p(y_raw)  # log(1 + n_trips) to handle zeros
+        logger.info(f"Target stats - Raw: min={y_raw.min():.2f}, max={y_raw.max():.2f}, mean={y_raw.mean():.2f}")
+        logger.info(f"Target stats - Log: min={y.min():.2f}, max={y.max():.2f}, mean={y.mean():.2f}")
         
         # Reset index to avoid XGBoost QuantileDMatrix errors with non-unique indices
         df_features = df_features.reset_index(drop=True)
         X = X.reset_index(drop=True)
-        y = y.reset_index(drop=True)
+        # y is now numpy array from log1p, convert to Series for compatibility
+        y = pd.Series(y, name='n_trips_log')
         
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
@@ -170,7 +178,7 @@ class ProbabilityEstimator:
             self.model.get_params(),
             X_scaled.assign(date=df_features['date']),
             y,
-            is_poisson=True
+            is_poisson=False  # Using log-transformed target with squared error
         )
         
         # Final training on all data
@@ -185,11 +193,13 @@ class ProbabilityEstimator:
         self.feature_names = list(X_train.columns)
         
         logger.info(f"Training completed. MAE: {cv_results['overall_metrics'].get('mae', 'N/A'):.3f}")
+        logger.info("Note: Target was log-transformed (log1p) to handle heavy-tailed distribution")
         
         return {
             'cv_results': cv_results,
             'feature_names': self.feature_names,
-            'training_samples': len(df)
+            'training_samples': len(df),
+            'log_transformed': True  # Flag for inference to apply expm1
         }
     
     def predict_probability(self, candidates: List[CandidateInput]) -> List[float]:
@@ -299,7 +309,8 @@ def train_probability(config: Config) -> ModelBundle:
     
     encoders = {
         'feature_builder_encoders': estimator.feature_builder.encoders,
-        'scaler': estimator.scaler
+        'scaler': estimator.scaler,
+        'log_transformed': training_results.get('log_transformed', False)  # Flag for inference
     }
     
     bundle = save_model_bundle(

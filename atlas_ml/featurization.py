@@ -274,7 +274,7 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], downcast='integer')
     
     logger.info("=" * 70)
-    logger.info(f"✓ DATASET READY: {len(df):,} samples × {len(df.columns)} features")
+    logger.info(f"[OK] DATASET READY: {len(df):,} samples × {len(df.columns)} features")
     logger.info("=" * 70)
     return df
 

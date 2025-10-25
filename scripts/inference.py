@@ -156,6 +156,7 @@ def prepare_input_features(
                 input_data['volumen_std_daily'] = float(result[8] or 0)
                 logger.info(f"Loaded historical stats from database for OD pair {origin_id}→{destination_id}")
             else:
+                # No historical data - this is acceptable, use zeros
                 logger.warning(f"No historical data found for OD pair {origin_id}→{destination_id}, using zeros")
                 for col in ['precio_mean_daily', 'precio_median_daily', 'precio_std_daily',
                            'peso_mean_daily', 'peso_median_daily', 'peso_std_daily',
@@ -163,17 +164,19 @@ def prepare_input_features(
                     input_data[col] = 0.0
             
         except Exception as e:
-            logger.warning(f"Failed to load historical data from DB: {e}, using placeholder zeros")
-            for col in ['precio_mean_daily', 'precio_median_daily', 'precio_std_daily',
-                       'peso_mean_daily', 'peso_median_daily', 'peso_std_daily',
-                       'volumen_mean_daily', 'volumen_median_daily', 'volumen_std_daily']:
-                input_data[col] = 0.0
+            # Database errors during inference are CRITICAL - fail fast
+            logger.error(f"CRITICAL: Failed to connect to database for historical stats: {e}")
+            raise RuntimeError(
+                f"Cannot run inference without database access. "
+                f"Historical statistics are required features. Error: {e}"
+            ) from e
     else:
-        # Use placeholder zeros
-        for col in ['precio_mean_daily', 'precio_median_daily', 'precio_std_daily',
-                   'peso_mean_daily', 'peso_median_daily', 'peso_std_daily',
-                   'volumen_mean_daily', 'volumen_median_daily', 'volumen_std_daily']:
-            input_data[col] = 0.0
+        # No database access - CRITICAL
+        logger.error("CRITICAL: Cannot run inference without database (use_db=False)")
+        raise RuntimeError(
+            "Database access is required for inference. "
+            "Historical statistics cannot be computed without database."
+        )
     
     # Load geographic features (coordinates and distance)
     if use_db:
@@ -216,16 +219,29 @@ def prepare_input_features(
                 input_data['log_od_length_km'] = np.log1p(input_data['od_length_km'])
                 logger.info(f"Loaded geographic data: distance = {input_data['od_length_km'].iloc[0]:.2f} km")
             else:
-                logger.warning(f"No geographic data found for OD pair, using zeros")
-                for col in ['origin_lon', 'origin_lat', 'destination_lon', 'destination_lat', 'od_length_km', 'log_od_length_km']:
-                    input_data[col] = 0.0
+                # Missing OD pair is CRITICAL - cannot predict without geographic data
+                logger.error(f"CRITICAL: OD pair {origin_id}→{destination_id} not found in database")
+                raise RuntimeError(
+                    f"Cannot run inference: OD pair {origin_id}→{destination_id} not found. "
+                    f"Geographic features (coordinates, distance) are required and cannot be zero."
+                )
+        except RuntimeError:
+            # Re-raise our own errors
+            raise
         except Exception as e:
-            logger.warning(f"Failed to load geographic data: {e}")
-            for col in ['origin_lon', 'origin_lat', 'destination_lon', 'destination_lat', 'od_length_km', 'log_od_length_km']:
-                input_data[col] = 0.0
+            # Database/connection errors are CRITICAL
+            logger.error(f"CRITICAL: Failed to load geographic data from database: {e}")
+            raise RuntimeError(
+                f"Cannot run inference without database access. "
+                f"Geographic features are required. Error: {e}"
+            ) from e
     else:
-        for col in ['origin_lon', 'origin_lat', 'destination_lon', 'destination_lat', 'od_length_km', 'log_od_length_km']:
-            input_data[col] = 0.0
+        # No database access - CRITICAL for production inference
+        logger.error("CRITICAL: Cannot run inference without database (use_db=False)")
+        raise RuntimeError(
+            "Database access is required for inference. "
+            "Geographic and historical features cannot be computed without database."
+        )
     
     # Holiday flag (simplified - you could load a holiday calendar)
     input_data['holiday_flag'] = 0
@@ -238,9 +254,12 @@ def prepare_input_features(
             encoder = encoders[col]
             try:
                 input_data[f'{col}_encoded'] = encoder.transform(input_data[col])
-            except ValueError:
-                # Unknown category
-                logger.warning(f"Unknown value for {col}: {input_data[col].iloc[0]}, using default")
+            except ValueError as e:
+                # Unknown category - this is acceptable with fallback
+                logger.warning(
+                    f"Unknown value for {col}: '{input_data[col].iloc[0]}'. "
+                    f"Known values: {list(encoder.classes_)}. Using -1 (unknown category)."
+                )
                 input_data[f'{col}_encoded'] = -1
     
     logger.info(f"Prepared input with {len(input_data.columns)} features")
