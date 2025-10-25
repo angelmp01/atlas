@@ -224,7 +224,15 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
     """
     from .io import create_database_manager, create_dataset_builder
     
-    logger.info("Building probability dataset (daily counts with uniform distribution)")
+    logger.info("=" * 70)
+    logger.info("BUILDING PROBABILITY TRAINING DATASET")
+    logger.info("=" * 70)
+    logger.info("This process has 4 main steps:")
+    logger.info("  1. Load raw data from database (~1-2 min)")
+    logger.info("  2. Add calculated features (~30 sec)")
+    logger.info("  3. Aggregate to daily OD pairs (~2-5 min)")
+    logger.info("  4. Encode categorical features (~10 sec)")
+    logger.info("=" * 70)
     
     # Initialize data components
     db_manager = create_database_manager(config)
@@ -232,6 +240,7 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
     feature_builder = ProbabilityFeatureBuilder(config, db_manager)
     
     # Load base dataset (all 2024 data)
+    logger.info("\n[STEP 1/4] Loading raw data from database...")
     base_df = dataset_builder.build_base_dataset(
         start_date='2024-01-01',
         end_date='2024-12-31'
@@ -241,10 +250,14 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
         raise ValueError("No training data found for 2024")
     
     # Aggregate to daily level
+    logger.info("\n[STEP 2/4] Aggregating to daily OD level...")
     df = dataset_builder.build_od_aggregates(base_df)
     
     # Build features (simplified: no tau, no historical)
+    logger.info("\n[STEP 3/4] Building features (encodings, etc.)...")
     df = feature_builder.build_features(df, include_tau=False)
+    
+    logger.info("\n[STEP 4/4] Validating dataset...")
     
     # Check for duplicate columns (critical for XGBoost)
     if df.columns.duplicated().any():
@@ -254,13 +267,15 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
         df = df.loc[:, ~df.columns.duplicated()]
     
     # Optimize memory usage by downcasting numeric types
-    logger.info("Optimizing memory usage...")
+    logger.info("  - Optimizing memory usage (downcasting dtypes)...")
     for col in df.select_dtypes(include=['float64']).columns:
         df[col] = pd.to_numeric(df[col], downcast='float')
     for col in df.select_dtypes(include=['int64']).columns:
         df[col] = pd.to_numeric(df[col], downcast='integer')
     
-    logger.info(f"Built probability dataset with {len(df)} samples and {len(df.columns)} features")
+    logger.info("=" * 70)
+    logger.info(f"✓ DATASET READY: {len(df):,} samples × {len(df.columns)} features")
+    logger.info("=" * 70)
     return df
 
 

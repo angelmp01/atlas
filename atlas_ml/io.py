@@ -37,9 +37,9 @@ class SoddLocation(Base):
 
 
 class SoddLoad(Base):
-    """ORM model for app.sodd_loads_logistics table."""
+    """ORM model for app.sodd_loads_filtered table."""
     
-    __tablename__ = 'sodd_loads_logistics'
+    __tablename__ = 'sodd_loads_filtered'
     __table_args__ = {'schema': 'app'}
     
     id = Column(Integer, primary_key=True)
@@ -145,7 +145,7 @@ class DatabaseManager:
                 ST_Y(ST_Transform(o.geom, 4326)) as origin_lat,
                 ST_X(ST_Transform(d.geom, 4326)) as destination_lon,
                 ST_Y(ST_Transform(d.geom, 4326)) as destination_lat
-            FROM app.sodd_loads_logistics l
+            FROM app.sodd_loads_filtered l
             JOIN app.sodd_locations o ON l.origin_id = o.location_id
             JOIN app.sodd_locations d ON l.destination_id = d.location_id
         """]
@@ -167,13 +167,16 @@ class DatabaseManager:
         
         query = text(" ".join(query_parts))
         
+        logger.info(f"Querying database for loads between {start_date or 'start'} and {end_date or 'end'}...")
+        logger.info("This may take 1-2 minutes for large datasets (millions of records)...")
+        
         with self.engine.connect() as conn:
             df = pd.read_sql(query, conn)
         
         # Convert date column
         df['date'] = pd.to_datetime(df['date'])
         
-        logger.info(f"Loaded {len(df)} load records from database")
+        logger.info(f"✓ Loaded {len(df):,} load records from database")
         return df
     
     def read_loads_with_time_bins(
@@ -266,7 +269,7 @@ class DatabaseManager:
         """
         query = text("""
             SELECT DISTINCT l.destination_id
-            FROM app.sodd_loads_logistics l
+            FROM app.sodd_loads_filtered l
             JOIN app.sodd_locations d ON l.destination_id = d.location_id
             WHERE l.origin_id = :origin_id
             AND ST_DWithin(
@@ -365,12 +368,16 @@ class DatasetBuilder:
         Returns:
             DataFrame with enhanced load data
         """
+        logger.info(f"Building base dataset from {start_date or 'start'} to {end_date or 'end'}...")
+        
         # Load raw data
         df = self.db.read_loads(start_date, end_date)
         
         if df.empty:
             logger.warning("No load data found for specified date range")
             return df
+        
+        logger.info(f"Processing {len(df):,} raw records - adding features...")
         
         # Add calculated distance per trip (trips_total_length_km is cumulative for all trips)
         # We need to divide by n_trips to get average distance per trip
@@ -399,7 +406,9 @@ class DatasetBuilder:
                 else row['od_length_km'],
                 axis=1
             )
-            logger.info("Normalized od_length_km by dividing trips_total_length_km by n_trips")
+            logger.info("✓ Normalized od_length_km by dividing trips_total_length_km by n_trips")
+        
+        logger.info("Adding time features (day_of_week, week_of_year, etc.)...")
         
         # Add time features
         from .utils import create_time_features
@@ -412,6 +421,8 @@ class DatasetBuilder:
             'refrigerada': 'refrigerado',
             'normal': 'normal'
         }).fillna('normal')
+        
+        logger.info(f"✓ Base dataset complete: {len(df):,} records with {len(df.columns)} features")
         
         if export_parquet:
             self.db.export_to_parquet(df, "base_loads_dataset")
@@ -428,8 +439,8 @@ class DatasetBuilder:
         Returns:
             DataFrame with OD-level aggregates
         """
-        logger.info(f"Aggregating {len(df):,} records to daily OD level...")
-        logger.info("This may take several minutes for large datasets...")
+        logger.info(f"Step 1/3: Aggregating {len(df):,} records to daily OD level...")
+        logger.info("Grouping by (date, origin, destination) - this takes 2-5 minutes for 20M+ records...")
         
         # Daily aggregates by (origin_id, destination_id)
         # Use 'first' instead of mode() for categorical - much faster and equivalent for most cases
@@ -443,6 +454,8 @@ class DatasetBuilder:
             'truck_type': 'first',  # Take first value (faster than mode)
             'tipo_mercancia': 'first'
         }).reset_index()
+        
+        logger.info(f"Step 2/3: Flattening {len(od_daily):,} aggregated rows...")
         
         # Flatten column names
         od_daily.columns = ['_'.join(col).strip('_') for col in od_daily.columns]
@@ -470,7 +483,7 @@ class DatasetBuilder:
         
         od_daily = od_daily.rename(columns=rename_dict)
         
-        logger.info(f"Aggregation completed: {len(od_daily):,} daily OD pairs")
+        logger.info(f"Step 3/3: ✓ Aggregation completed - {len(od_daily):,} daily OD pairs created")
         
         return od_daily
 
