@@ -1,11 +1,10 @@
 """
-Probability estimation module for ATLAS ML package.
+Trip count prediction module for ATLAS ML package.
 
-Implements models for π_{i→d}(τ): probability that at arrival (elapsed time τ since trip start)
-there is at least one available load from zone i to destination d.
+Predicts the expected number of freight vehicles (n_trips_logistic) per day
+for origin-destination pairs. This provides interpretable estimates for route optimization.
 
-Uses daily trip count prediction with uniform distribution over 24 hours.
-Formula: P(≥1 load in 1 min) = 1 - exp(-λ) where λ = n_trips_daily / (24 * 60)
+The model predicts: E[n_trips_logistic_{i→d}] = expected daily freight vehicles from i to d
 """
 
 import logging
@@ -29,7 +28,7 @@ from .evaluation import CrossValidator, create_model_card
 from .featurization import ProbabilityFeatureBuilder, build_probability_dataset
 from .io import create_database_manager
 from .serialization import ModelBundle, save_model_bundle
-from .utils import set_random_seed, to_tau_bin, clamp_probability
+from .utils import set_random_seed, to_tau_bin
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +44,7 @@ class CandidateInput:
     day_of_week: int            # 0..6 (Monday=0, Sunday=6)
     week_of_year: int           # 1..53
     holiday_flag: int           # 0/1
-    tau_minutes: int            # Elapsed minutes since departure
+    tau_minutes: int            # Elapsed minutes since departure (currently unused)
 
 
 @dataclass
@@ -54,8 +53,8 @@ class CandidateOutput:
     
     i_location_id: int          # Origin zone
     d_location_id: int          # Destination zone
-    tau_minutes: int            # Elapsed time
-    pi: float                   # Probability of ≥1 available load π_{i→d}(τ)
+    tau_minutes: int            # Elapsed time (currently unused)
+    expected_trips_per_day: float  # Expected freight vehicles per day (n_trips_logistic)
     exp_price: float            # Expected price (€)
     exp_weight: float           # Expected weight (kg)
 
@@ -110,27 +109,34 @@ class ProbabilityEstimator:
         Train probability model using daily trip counts with uniform distribution.
         
         Approach:
-        1. Predict daily trip counts using XGBoost/RandomForest
+        1. Predict daily trip counts (n_trips_logistic from DB) using XGBoost/RandomForest
         2. Convert to instantaneous probability: P = 1 - exp(-λ) where λ = n_trips_daily/(24*60)
         3. Assumes uniform distribution over 24 hours (simple, honest approach)
         
+        Target variable source:
+        - Primary: n_trips_logistic from app.sodd_loads_logistics (freight vehicle count estimate)
+        - This represents the estimated number of freight transport vehicles per OD pair per day
+        
         Args:
-            df: DataFrame with daily aggregated data (columns: n_trips_daily, ...)
+            df: DataFrame with daily aggregated data (columns: n_trips_daily or n_trips_logistic, ...)
             
         Returns:
-            Training results dictionary
+            Training results dictionary with CV metrics and feature names
         """
         logger.info("Training probability model (daily counts + uniform distribution)")
+        logger.info("Target variable: n_trips_logistic (freight vehicle count from database)")
         
         if 'n_trips_daily' not in df.columns:
-            # Try to use 'n_trips_logistic' as daily count (from sodd_loads_logistics)
+            # Primary source: n_trips_logistic from sodd_loads_logistics table
             if 'n_trips_logistic' in df.columns:
                 df['n_trips_daily'] = df['n_trips_logistic']
+                logger.info(f"Using n_trips_logistic as target (range: {df['n_trips_daily'].min():.0f} - {df['n_trips_daily'].max():.0f})")
             # Fallback to 'n_trips' for backward compatibility
             elif 'n_trips' in df.columns:
                 df['n_trips_daily'] = df['n_trips']
+                logger.warning("Using 'n_trips' as fallback target (n_trips_logistic not found)")
             else:
-                raise ValueError("Regime B requires daily trip counts (n_trips_daily, n_trips_logistic, or n_trips)")
+                raise ValueError("No valid target found: requires n_trips_daily, n_trips_logistic, or n_trips column")
         
         df = df.copy()
         
@@ -188,13 +194,17 @@ class ProbabilityEstimator:
     
     def predict_probability(self, candidates: List[CandidateInput]) -> List[float]:
         """
-        Predict probability π_{i→d}(τ) for candidate locations.
+        Predict expected daily trip counts for candidate locations.
+        
+        Returns the predicted number of freight vehicles (n_trips_logistic) per day
+        for each origin-destination pair. This is more interpretable than probability
+        and matches the training data directly.
         
         Args:
             candidates: List of candidate inputs
             
         Returns:
-            List of probabilities [0, 1]
+            List of predicted daily trip counts (n_trips_logistic per day)
         """
         if self.model is None:
             raise ValueError("Model not trained. Call fit() first.")
@@ -226,28 +236,13 @@ class ProbabilityEstimator:
         X = df_features[self.feature_names].fillna(0)
         X_scaled = self.scaler.transform(X)
         
-        # Predict daily trip counts
+        # Predict daily trip counts (n_trips_logistic from training)
         daily_rates = self.model.predict(X_scaled)
         daily_rates = np.maximum(daily_rates, 0)  # Ensure non-negative
         
-        # Convert to instantaneous probabilities (uniform distribution over 24 hours)
-        probabilities = []
-        
-        for rate in daily_rates:
-            # Rate per minute (uniform distribution over 24 hours)
-            lambda_per_minute = rate / (24 * 60)
-            
-            # Instantaneous probability (1-minute window)
-            # P(≥1 arrival in 1 minute) = 1 - exp(-λ)
-            probability = 1 - np.exp(-lambda_per_minute)
-            probabilities.append(probability)
-        
-        probabilities = np.array(probabilities)
-        
-        # Clamp probabilities to [0, 1]
-        probabilities = [clamp_probability(p) for p in probabilities]
-        
-        return probabilities
+        # Return daily trip counts directly (no conversion to per-minute probability)
+        # This is more interpretable: "Expected X freight vehicles per day on this route"
+        return daily_rates.tolist()
 
 
 def train_probability(config: Config) -> ModelBundle:
@@ -358,27 +353,27 @@ def predict_probability(candidates: List[CandidateInput], bundle: ModelBundle) -
 
 def predict_all(candidates: List[CandidateInput], bundle: ModelBundle) -> List[CandidateOutput]:
     """
-    Predict all outputs (probability, price, weight) for candidates.
+    Predict all outputs (trip counts, price, weight) for candidates.
     
     Note: This function requires price and weight model bundles to be available.
-    For now, it only predicts probabilities and sets price/weight to placeholder values.
+    For now, it only predicts trip counts and sets price/weight to placeholder values.
     
     Args:
         candidates: List of candidate inputs
-        bundle: Probability model bundle
+        bundle: Trip count prediction model bundle
         
     Returns:
         List of complete candidate outputs
     """
-    probabilities = predict_probability(candidates, bundle)
+    expected_trips = predict_probability(candidates, bundle)  # Returns daily trip counts
     
     outputs = []
-    for candidate, prob in zip(candidates, probabilities):
+    for candidate, trips in zip(candidates, expected_trips):
         output = CandidateOutput(
             i_location_id=candidate.i_location_id,
             d_location_id=candidate.d_location_id,
             tau_minutes=candidate.tau_minutes,
-            pi=prob,
+            expected_trips_per_day=trips,  # Daily freight vehicle count
             exp_price=100.0,  # Placeholder - implement price prediction
             exp_weight=500.0   # Placeholder - implement weight prediction
         )

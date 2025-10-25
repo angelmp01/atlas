@@ -46,16 +46,20 @@ class ModelConfig(BaseModel):
     # Model hyperparameters
     xgb_params: Dict = Field(
         default_factory=lambda: {
-            "max_depth": 6,
-            "learning_rate": 0.1,
-            "n_estimators": 100,
+            "max_depth": 10,  # Increased from 6 to 10 for more complex patterns
+            "learning_rate": 0.05,  # Decreased from 0.1 for more stable learning
+            "n_estimators": 500,  # Increased from 100 to 500 for better fit
+            "min_child_weight": 1,  # Regularization to prevent overfitting
+            "subsample": 0.8,  # Use 80% of data per tree for regularization
+            "colsample_bytree": 0.8,  # Use 80% of features per tree
             "objective": "binary:logistic",  # Will be overridden for regressors
             "random_state": 42,
             "n_jobs": -1,
-            "tree_method": "hist",
-            "device": "cuda",
+            "tree_method": "hist",  # Fast histogram-based algorithm
+            "device": "cuda",  # Use GPU if available
+            "max_bin": 256,  # Number of bins for histogram (higher = more precision)
         },
-        description="XGBoost hyperparameters"
+        description="XGBoost hyperparameters - tuned for large datasets with complex patterns"
     )
     
     rf_params: Dict = Field(
