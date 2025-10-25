@@ -46,8 +46,9 @@ class SoddLoad(Base):
     date = Column(Date)
     origin_id = Column(Integer)
     destination_id = Column(Integer)
-    n_trips_logistic = Column(Integer)
-    trips_total_length_km = Column(Float)
+    n_trips = Column(Integer)  # Total trip count
+    n_trips_logistic = Column(Integer)  # n_trips * 0.04 (freight vehicle estimate)
+    trips_total_length_km = Column(Float)  # Sum of all trip distances (must divide by n_trips)
     tipo_mercancia = Column(String)  # 'normal' or 'refrigerada'
     volumen = Column(Float)
     peso = Column(Float)
@@ -131,6 +132,7 @@ class DatabaseManager:
                 l.date,
                 l.origin_id,
                 l.destination_id,
+                l.n_trips,
                 l.n_trips_logistic,
                 l.trips_total_length_km,
                 l.tipo_mercancia,
@@ -370,7 +372,8 @@ class DatasetBuilder:
             logger.warning("No load data found for specified date range")
             return df
         
-        # Add calculated distance if not available
+        # Add calculated distance per trip (trips_total_length_km is cumulative for all trips)
+        # We need to divide by n_trips to get average distance per trip
         if 'trips_total_length_km' not in df.columns or df['trips_total_length_km'].isna().any():
             from .utils import haversine_distance
             df['calculated_distance_km'] = df.apply(
@@ -384,6 +387,19 @@ class DatasetBuilder:
             df['od_length_km'] = df['trips_total_length_km'].fillna(df['calculated_distance_km'])
         else:
             df['od_length_km'] = df['trips_total_length_km']
+        
+        # CRITICAL FIX: Divide by n_trips to get distance per trip (not total)
+        # trips_total_length_km contains the sum of all trip distances, not individual trip distance
+        # Note: n_trips_logistic = n_trips * 0.04 (freight vehicle estimate), so we use n_trips here
+        if 'n_trips' in df.columns:
+            # Avoid division by zero - if n_trips is 0 or NaN, keep original distance
+            df['od_length_km'] = df.apply(
+                lambda row: row['od_length_km'] / row['n_trips'] 
+                if pd.notna(row['n_trips']) and row['n_trips'] > 0 
+                else row['od_length_km'],
+                axis=1
+            )
+            logger.info("Normalized od_length_km by dividing trips_total_length_km by n_trips")
         
         # Add time features
         from .utils import create_time_features
@@ -418,7 +434,8 @@ class DatasetBuilder:
         # Daily aggregates by (origin_id, destination_id)
         # Use 'first' instead of mode() for categorical - much faster and equivalent for most cases
         od_daily = df.groupby(['date', 'origin_id', 'destination_id']).agg({
-            'n_trips_logistic': 'sum',
+            'n_trips': 'sum',  # Total trips
+            'n_trips_logistic': 'sum',  # Freight vehicle estimate (n_trips * 0.04)
             'precio': ['mean', 'median', 'std'],
             'peso': ['mean', 'median', 'std'],
             'volumen': ['mean', 'median', 'std'],
@@ -435,7 +452,8 @@ class DatasetBuilder:
             'date_': 'date',
             'origin_id_': 'origin_id',
             'destination_id_': 'destination_id',
-            'n_trips_logistic_sum': 'n_trips_daily',
+            'n_trips_sum': 'n_trips_total',  # Total trips per day
+            'n_trips_logistic_sum': 'n_trips_daily',  # Freight vehicles per day (target variable)
             'precio_mean': 'precio_mean_daily',
             'precio_median': 'precio_median_daily',
             'precio_std': 'precio_std_daily',
