@@ -339,8 +339,16 @@ def run_inference(
     }
     
     if model_type == 'probability':
-        # Model predicts daily trip count directly
-        n_trips_daily = float(prediction[0])
+        # Model predicts daily trip count (possibly log-transformed)
+        prediction_value = float(prediction[0])
+        
+        # Reverse log-transform if model was trained with it
+        if bundle.encoders.get('log_transformed', False):
+            n_trips_daily = np.expm1(prediction_value)  # expm1(x) = exp(x) - 1, inverse of log1p
+            logger.debug(f"Reversed log-transform: {prediction_value:.4f} -> {n_trips_daily:.4f}")
+        else:
+            n_trips_daily = prediction_value
+        
         result['n_trips_daily'] = n_trips_daily
         result['interpretation'] = f"Predicted {n_trips_daily:.2f} daily trips on this route"
     elif model_type == 'price':

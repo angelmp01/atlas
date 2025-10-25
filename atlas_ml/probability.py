@@ -97,7 +97,8 @@ class ProbabilityEstimator:
                 return xgb.XGBClassifier(**params)
             else:
                 params = self.config.model.xgb_params.copy()
-                params['objective'] = 'count:poisson'
+                # Use squared error for log-transformed counts (not Poisson anymore)
+                params['objective'] = 'reg:squarederror'
                 return xgb.XGBRegressor(**params)
         else:
             if is_classifier:
@@ -123,7 +124,7 @@ class ProbabilityEstimator:
         logger.info("Training probability model (daily counts + uniform distribution)")
         
         if 'n_trips_daily' not in df.columns:
-            # Try to use 'n_trips_logistic' as daily count (from sodd_loads_logistics)
+            # Try to use 'n_trips_logistic' as daily count (from sodd_loads_filtered)
             if 'n_trips_logistic' in df.columns:
                 df['n_trips_daily'] = df['n_trips_logistic']
             # Fallback to 'n_trips' for backward compatibility
@@ -143,12 +144,19 @@ class ProbabilityEstimator:
         feature_columns = [col for col in df_features.columns if col not in excluded_cols]
         
         X = df_features[feature_columns].fillna(0)
-        y = df_features['n_trips_daily'].clip(lower=0)  # Ensure non-negative
+        y_raw = df_features['n_trips_daily'].clip(lower=0)  # Ensure non-negative
+        
+        # Log-transform target to handle heavy-tailed distribution (75% < 1, 0.03% > 500)
+        # This allows model to learn both low and high trip counts effectively
+        y = np.log1p(y_raw)  # log(1 + n_trips) to handle zeros
+        logger.info(f"Target stats - Raw: min={y_raw.min():.2f}, max={y_raw.max():.2f}, mean={y_raw.mean():.2f}")
+        logger.info(f"Target stats - Log: min={y.min():.2f}, max={y.max():.2f}, mean={y.mean():.2f}")
         
         # Reset index to avoid XGBoost QuantileDMatrix errors with non-unique indices
         df_features = df_features.reset_index(drop=True)
         X = X.reset_index(drop=True)
-        y = y.reset_index(drop=True)
+        y_raw = y_raw.reset_index(drop=True)
+        y = pd.Series(y).reset_index(drop=True)
         
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
@@ -157,14 +165,14 @@ class ProbabilityEstimator:
         # Train count model
         self.model = self._create_model(self.config.model.probability_model_type, is_classifier=False)
         
-        # Cross-validation for count model
+        # Cross-validation for log-transformed count model (not Poisson anymore)
         cv = CrossValidator(self.config)
         cv_results = cv.cross_validate_regressor(
             type(self.model),
             self.model.get_params(),
             X_scaled.assign(date=df_features['date']),
             y,
-            is_poisson=True
+            is_poisson=False  # Using log-transform, not Poisson objective
         )
         
         # Final training on all data
@@ -175,15 +183,18 @@ class ProbabilityEstimator:
         # (honest approach without real time-of-day data)
         self.shape_learner = None
         
-        # Store feature names
+        # Store feature names and transformation flag
         self.feature_names = list(X_train.columns)
+        self.log_transformed = True  # Flag to reverse transform in prediction
         
         logger.info(f"Training completed. MAE: {cv_results['overall_metrics'].get('mae', 'N/A'):.3f}")
+        logger.info("Note: Target was log-transformed (log1p) to handle heavy-tailed distribution")
         
         return {
             'cv_results': cv_results,
             'feature_names': self.feature_names,
-            'training_samples': len(df)
+            'training_samples': len(df),
+            'log_transformed': True
         }
     
     def predict_probability(self, candidates: List[CandidateInput]) -> List[float]:
@@ -304,7 +315,8 @@ def train_probability(config: Config) -> ModelBundle:
     
     encoders = {
         'feature_builder_encoders': estimator.feature_builder.encoders,
-        'scaler': estimator.scaler
+        'scaler': estimator.scaler,
+        'log_transformed': estimator.log_transformed  # Save transformation flag
     }
     
     bundle = save_model_bundle(
