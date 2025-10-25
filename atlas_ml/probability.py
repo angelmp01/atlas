@@ -8,6 +8,7 @@ The model predicts: E[n_trips_logistic_{i→d}] = expected daily freight vehicle
 """
 
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -16,6 +17,10 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import StandardScaler
+
+# Suppress XGBoost deprecation warnings (we're using the correct new syntax)
+warnings.filterwarnings('ignore', message='.*tree method.*deprecated.*')
+warnings.filterwarnings('ignore', message='.*Falling back to prediction using DMatrix.*')
 
 try:
     import xgboost as xgb

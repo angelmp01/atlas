@@ -313,6 +313,54 @@ The modular structure allows easy extension:
 - **Enhanced analytics**: Add analysis modules for deeper insights
 - **Data visualization**: Integrate visualization tools for data exploration
 
+## 🤖 Model Evaluation & Comparison
+
+Atlas includes tools for comparing trained machine learning models:
+
+### Compare Models Tool
+
+The `compare_models.py` script provides comprehensive model comparison with:
+- **Visual tables**: Clean, tabulated output for easy reading
+- **Per-task grouping**: Separate tables for probability, price, and weight models
+- **Best model identification**: Automatic detection of best model per task (marked with ✓)
+- **Size metrics**: Model size in MB for deployment considerations
+- **Training metadata**: Date, features count, cross-validation folds
+- **Multiple exports**: CSV and JSON formats for further analysis
+
+#### Usage
+
+```bash
+# Compare all models
+python scripts/compare_models.py
+
+# Compare models for specific task
+python scripts/compare_models.py --task probability
+
+# Use custom models directory
+python scripts/compare_models.py --models-dir path/to/models
+```
+
+#### Example Output
+
+```
+================================================================================
+PROBABILITY MODELS
+================================================================================
+
+Model                                Date              Size MB    MAE         MAE_Std     R²          RMSE        Features
+-----------------------------------  ----------------  ---------  ----------  ----------  ----------  ----------  ----------
+probability_v20251025_190949         25/10/2025 19:09  28.4       0.005167    0.000309    0.998068    0.033553    19
+probability_v20251025_220658         25/10/2025 22:06  28.4       0.005167    0.000309    0.998068    0.033553    19
+───────────────────────────────────  ────────────────  ──────     ──────────  ──────────  ──────────  ──────────  ────────
+✓ probability_v20251025_190949       25/10/2025 19:09  28.4       0.005167    0.000309    0.998068    0.033553    19
+```
+
+#### Output Files
+
+Results are saved to `experiments/` directory:
+- `model_comparison_YYYYMMDD_HHMMSS.csv`: All model metrics in CSV format
+- `model_comparison_YYYYMMDD_HHMMSS.json`: Complete metrics in JSON format
+
 ## 📋 Future Roadmap
 
 - [ ] Enhanced data analytics and visualization

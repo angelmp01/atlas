@@ -6,12 +6,17 @@ for loads from origin i to destination d.
 """
 
 import logging
+import warnings
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
+
+# Suppress XGBoost deprecation warnings (we're using the correct new syntax)
+warnings.filterwarnings('ignore', message='.*tree method.*deprecated.*')
+warnings.filterwarnings('ignore', message='.*Falling back to prediction using DMatrix.*')
 
 try:
     import xgboost as xgb
