@@ -386,7 +386,8 @@ class ModelVersionManager:
     def get_bundle_path(
         self,
         task_type: str,
-        version: Optional[str] = None
+        version: Optional[str] = None,
+        quick_test: bool = False
     ) -> Path:
         """
         Get path for a model bundle.
@@ -394,6 +395,7 @@ class ModelVersionManager:
         Args:
             task_type: Task type ('probability', 'price', 'weight')
             version: Model version (if None, use timestamp)
+            quick_test: If True, prepend 'quicktest_' to folder name
             
         Returns:
             Path for model bundle
@@ -402,7 +404,8 @@ class ModelVersionManager:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             version = f"v{timestamp}"
         
-        bundle_name = f"{task_type}_{version}"
+        prefix = "quicktest_" if quick_test else ""
+        bundle_name = f"{prefix}{task_type}_{version}"
         return self.models_dir / bundle_name
     
     def get_latest_bundle(
@@ -411,6 +414,7 @@ class ModelVersionManager:
     ) -> Optional[ModelBundle]:
         """
         Get the latest model bundle for a task type.
+        Excludes quicktest models (folders starting with 'quicktest_').
         
         Args:
             task_type: Task type to search for
@@ -420,10 +424,12 @@ class ModelVersionManager:
         """
         bundles = list_model_bundles(self.models_dir)
         
-        # Filter by task type
+        # Filter by task type and exclude quicktest models
         filtered_bundles = [
             b for b in bundles
-            if b["task_type"] == task_type and b["valid"]
+            if b["task_type"] == task_type 
+            and b["valid"]
+            and not Path(b["model_path"]).name.startswith("quicktest_")
         ]
         
         if not filtered_bundles:

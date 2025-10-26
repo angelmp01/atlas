@@ -53,7 +53,6 @@ class ModelConfig(BaseModel):
             "subsample": 0.8,  # Use 80% of data per tree for regularization
             "colsample_bytree": 0.8,  # Use 80% of features per tree
             "objective": "binary:logistic",  # Will be overridden for regressors
-            "random_state": 42,
             "n_jobs": -1,
             "tree_method": "hist",  # Fast histogram-based algorithm
             "device": "cuda",  # Use GPU if available
@@ -146,6 +145,26 @@ class Config(BaseModel):
     # Global settings
     random_state: int = Field(default=42, description="Global random state")
     verbose: bool = Field(default=True, description="Enable verbose logging")
+    
+    # Quick test mode: limit to specific OD pairs for fast testing
+    quick_test_od_pairs: list = Field(
+        default_factory=lambda: [
+            # Barcelona - Lleida
+            ('08019', '25120'),  # Barcelona - Lleida
+            ('25120', '08019'),  # Lleida - Barcelona
+            # Barcelona - Tarragona
+            ('08019', '43148'),  # Barcelona - Tarragona
+            ('43148', '08019'),  # Tarragona - Barcelona
+            # Barcelona - Girona
+            ('08019', '17079'),  # Barcelona - Girona
+            ('17079', '08019'),  # Girona - Barcelona
+            # Girona - Lleida
+            ('17079', '25120'),  # Girona - Lleida
+            # Tarragona - Lleida
+            ('43148', '25120'),  # Tarragona - Lleida
+        ],
+        description="OD pairs to use in quick test mode (--quick-test flag): Catalan capitals"
+    )
     
     class Config:
         """Pydantic config."""

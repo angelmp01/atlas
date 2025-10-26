@@ -113,7 +113,8 @@ class DatabaseManager:
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        od_pairs_filter: Optional[list] = None
     ) -> pd.DataFrame:
         """
         Read load data from the database.
@@ -122,6 +123,7 @@ class DatabaseManager:
             start_date: Start date filter (YYYY-MM-DD)
             end_date: End date filter (YYYY-MM-DD)
             limit: Maximum number of records to return
+            od_pairs_filter: List of (origin_id, destination_id) tuples to filter by (for quick testing)
             
         Returns:
             DataFrame with load data including origin/destination coordinates
@@ -150,12 +152,20 @@ class DatabaseManager:
             JOIN app.sodd_locations d ON l.destination_id = d.location_id
         """]
         
-        # Add date filters
+        # Add filters
         where_conditions = []
         if start_date:
             where_conditions.append(f"l.date >= '{start_date}'")
         if end_date:
             where_conditions.append(f"l.date <= '{end_date}'")
+        
+        # Add OD pair filter for quick testing
+        if od_pairs_filter:
+            od_conditions = [
+                f"(l.origin_id = '{origin}' AND l.destination_id = '{dest}')"
+                for origin, dest in od_pairs_filter
+            ]
+            where_conditions.append(f"({' OR '.join(od_conditions)})")
         
         if where_conditions:
             query_parts.append("WHERE " + " AND ".join(where_conditions))
@@ -167,8 +177,11 @@ class DatabaseManager:
         
         query = text(" ".join(query_parts))
         
-        logger.info(f"Querying database for loads between {start_date or 'start'} and {end_date or 'end'}...")
-        logger.info("This may take 1-2 minutes for large datasets (millions of records)...")
+        if od_pairs_filter:
+            logger.info(f"QUICK TEST MODE: Querying {len(od_pairs_filter)} OD pairs from {start_date or 'start'} to {end_date or 'end'}...")
+        else:
+            logger.info(f"Querying database for loads between {start_date or 'start'} and {end_date or 'end'}...")
+            logger.info("This may take 1-2 minutes for large datasets (millions of records)...")
         
         with self.engine.connect() as conn:
             df = pd.read_sql(query, conn)
@@ -355,7 +368,8 @@ class DatasetBuilder:
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        export_parquet: bool = True
+        export_parquet: bool = True,
+        od_pairs_filter: Optional[list] = None
     ) -> pd.DataFrame:
         """
         Build base dataset with all loads and location information.
@@ -364,6 +378,7 @@ class DatasetBuilder:
             start_date: Start date filter
             end_date: End date filter
             export_parquet: Whether to export to Parquet
+            od_pairs_filter: List of (origin_id, destination_id) tuples for quick testing
             
         Returns:
             DataFrame with enhanced load data
@@ -371,7 +386,7 @@ class DatasetBuilder:
         logger.info(f"Building base dataset from {start_date or 'start'} to {end_date or 'end'}...")
         
         # Load raw data
-        df = self.db.read_loads(start_date, end_date)
+        df = self.db.read_loads(start_date, end_date, od_pairs_filter=od_pairs_filter)
         
         if df.empty:
             logger.warning("No load data found for specified date range")

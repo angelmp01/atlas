@@ -78,16 +78,20 @@ class RegressionEstimator:
         else:
             return RandomForestRegressor(**self.config.model.rf_params)
     
-    def fit(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def fit(self, df: pd.DataFrame, wandb_logger=None) -> Dict[str, Any]:
         """
         Train the regression model.
         
         Args:
             df: Training dataset with features and target
+            wandb_logger: Optional WandbLogger for logging metrics
             
         Returns:
             Training results dictionary
         """
+        import time
+        start_time = time.time()
+        
         logger.info(f"Training {self.target_type} regression model")
         
         # Validate target column
@@ -151,12 +155,13 @@ class RegressionEstimator:
         self.model = self._create_model()
         
         # Cross-validation
-        cv = CrossValidator(self.config)
+        cv = CrossValidator(self.config, wandb_logger=wandb_logger)
         cv_results = cv.cross_validate_regressor(
             type(self.model),
             self.model.get_params(),
             X_scaled.assign(date=df_features['date']),
-            y
+            y,
+            task_name=self.target_type  # "price" or "weight"
         )
         
         # Final training on all data
@@ -170,16 +175,21 @@ class RegressionEstimator:
         # Store feature names
         self.feature_names = list(X_train.columns)
         
+        # Calculate training time
+        training_time_seconds = time.time() - start_time
+        
         # Log performance
         mae = cv_results['overall_metrics'].get('mae', 'N/A')
         r2 = cv_results['overall_metrics'].get('r2', 'N/A')
         logger.info(f"{self.target_type.title()} model training completed. MAE: {mae}, R²: {r2}")
+        logger.info(f"Training time: {training_time_seconds:.2f} seconds")
         
         return {
             'cv_results': cv_results,
             'feature_names': self.feature_names,
             'training_samples': len(df_clean),
-            'log_transformed': self._log_transformed
+            'log_transformed': self._log_transformed,
+            'training_time_seconds': training_time_seconds
         }
     
     def predict(self, candidates: List[CandidateInput]) -> List[float]:
@@ -254,7 +264,7 @@ class WeightEstimator(RegressionEstimator):
         super().__init__(config, 'weight')
 
 
-def train_price(config: Config) -> ModelBundle:
+def train_price(config: Config, wandb_logger=None, quick_test: bool = False) -> ModelBundle:
     """
     Train price estimation model.
     
@@ -263,6 +273,8 @@ def train_price(config: Config) -> ModelBundle:
     
     Args:
         config: Configuration object
+        wandb_logger: Optional WandbLogger for logging metrics
+        quick_test: If True, use only a few OD pairs for fast testing
         
     Returns:
         Trained ModelBundle for price estimation
@@ -271,7 +283,7 @@ def train_price(config: Config) -> ModelBundle:
     
     # Build dataset
     try:
-        df = build_price_dataset(config)
+        df = build_price_dataset(config, quick_test=quick_test)
     except Exception as e:
         logger.error(f"Failed to build price dataset: {e}")
         raise
@@ -281,7 +293,7 @@ def train_price(config: Config) -> ModelBundle:
     
     # Initialize and train estimator
     estimator = PriceEstimator(config)
-    training_results = estimator.fit(df)
+    training_results = estimator.fit(df, wandb_logger=wandb_logger)
     
     # Create model card
     model_card = create_model_card(
@@ -297,10 +309,39 @@ def train_price(config: Config) -> ModelBundle:
         }
     )
     
+    # Log summary metrics to wandb
+    if wandb_logger:
+        wandb_logger.log_task_summary(
+            task="price",
+            cv_metrics=training_results['cv_results']['cv_metrics'],
+            overall_metrics=training_results['cv_results']['overall_metrics'],
+            n_folds=training_results['cv_results']['n_folds']
+        )
+        
+        # Log hyperparameters
+        wandb_logger.log_hyperparameters(
+            estimator.model.get_params(),
+            prefix="price/model_"
+        )
+        
+        # Log training time
+        wandb_logger.log_metrics({
+            "price/training_time_seconds": training_results.get('training_time_seconds', 0),
+            "price/training_time_minutes": training_results.get('training_time_seconds', 0) / 60
+        })
+        
+        # Log dataset info
+        wandb_logger.log_dataset_info({
+            "n_samples_price": training_results['training_samples'],
+            "n_features_price": len(estimator.feature_names),
+            "feature_names_price": estimator.feature_names[:20],
+            "log_transformed": training_results['log_transformed']
+        })
+    
     # Save model bundle
     from .serialization import ModelVersionManager
     version_manager = ModelVersionManager(config.paths.models_dir)
-    bundle_path = version_manager.get_bundle_path('price')
+    bundle_path = version_manager.get_bundle_path('price', quick_test=quick_test)
     
     # Prepare artifacts
     if estimator.feature_builder is None:
@@ -327,7 +368,7 @@ def train_price(config: Config) -> ModelBundle:
     return bundle
 
 
-def train_weight(config: Config) -> ModelBundle:
+def train_weight(config: Config, wandb_logger=None, quick_test: bool = False) -> ModelBundle:
     """
     Train weight estimation model.
     
@@ -336,6 +377,8 @@ def train_weight(config: Config) -> ModelBundle:
     
     Args:
         config: Configuration object
+        wandb_logger: Optional WandbLogger for logging metrics
+        quick_test: If True, use only a few OD pairs for fast testing
         
     Returns:
         Trained ModelBundle for weight estimation
@@ -344,7 +387,7 @@ def train_weight(config: Config) -> ModelBundle:
     
     # Build dataset
     try:
-        df = build_weight_dataset(config)
+        df = build_weight_dataset(config, quick_test=quick_test)
     except Exception as e:
         logger.error(f"Failed to build weight dataset: {e}")
         raise
@@ -354,7 +397,7 @@ def train_weight(config: Config) -> ModelBundle:
     
     # Initialize and train estimator
     estimator = WeightEstimator(config)
-    training_results = estimator.fit(df)
+    training_results = estimator.fit(df, wandb_logger=wandb_logger)
     
     # Create model card
     model_card = create_model_card(
@@ -370,10 +413,39 @@ def train_weight(config: Config) -> ModelBundle:
         }
     )
     
+    # Log summary metrics to wandb
+    if wandb_logger:
+        wandb_logger.log_task_summary(
+            task="weight",
+            cv_metrics=training_results['cv_results']['cv_metrics'],
+            overall_metrics=training_results['cv_results']['overall_metrics'],
+            n_folds=training_results['cv_results']['n_folds']
+        )
+        
+        # Log hyperparameters
+        wandb_logger.log_hyperparameters(
+            estimator.model.get_params(),
+            prefix="weight/model_"
+        )
+        
+        # Log training time
+        wandb_logger.log_metrics({
+            "weight/training_time_seconds": training_results.get('training_time_seconds', 0),
+            "weight/training_time_minutes": training_results.get('training_time_seconds', 0) / 60
+        })
+        
+        # Log dataset info
+        wandb_logger.log_dataset_info({
+            "n_samples_weight": training_results['training_samples'],
+            "n_features_weight": len(estimator.feature_names),
+            "feature_names_weight": estimator.feature_names[:20],
+            "log_transformed": training_results['log_transformed']
+        })
+    
     # Save model bundle
     from .serialization import ModelVersionManager
     version_manager = ModelVersionManager(config.paths.models_dir)
-    bundle_path = version_manager.get_bundle_path('weight')
+    bundle_path = version_manager.get_bundle_path('weight', quick_test=quick_test)
     
     # Prepare artifacts
     if estimator.feature_builder is None:
