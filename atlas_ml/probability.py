@@ -370,6 +370,14 @@ def train_probability(config: Config, wandb_logger=None, quick_test: bool = Fals
         config=config
     )
     
+    # Log model bundle as artifact to wandb
+    if wandb_logger:
+        wandb_logger.log_model_bundle(
+            model_path=bundle_path,
+            task="probability",
+            metrics=training_results['cv_results']['overall_metrics']
+        )
+    
     logger.info(f"Probability model training completed. Bundle saved to: {bundle_path}")
     return bundle
 

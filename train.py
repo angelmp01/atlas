@@ -253,7 +253,7 @@ Ejemplos de uso:
         try:
             # Get GPU info for tags
             import platform
-            tags = ['xgboost', 'cv-7folds']
+            tags = []
             
             # Add quick-test tag if enabled
             if args.quick_test:

@@ -364,6 +364,14 @@ def train_price(config: Config, wandb_logger=None, quick_test: bool = False) -> 
         config=config
     )
     
+    # Log model bundle as artifact to wandb
+    if wandb_logger:
+        wandb_logger.log_model_bundle(
+            model_path=bundle_path,
+            task="price",
+            metrics=training_results['cv_results']['overall_metrics']
+        )
+    
     logger.info(f"Price model training completed. Bundle saved to: {bundle_path}")
     return bundle
 
@@ -467,6 +475,14 @@ def train_weight(config: Config, wandb_logger=None, quick_test: bool = False) ->
         metadata=model_card,
         config=config
     )
+    
+    # Log model bundle as artifact to wandb
+    if wandb_logger:
+        wandb_logger.log_model_bundle(
+            model_path=bundle_path,
+            task="weight",
+            metrics=training_results['cv_results']['overall_metrics']
+        )
     
     logger.info(f"Weight model training completed. Bundle saved to: {bundle_path}")
     return bundle

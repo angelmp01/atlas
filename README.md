@@ -361,6 +361,83 @@ Results are saved to `experiments/` directory:
 - `model_comparison_YYYYMMDD_HHMMSS.csv`: All model metrics in CSV format
 - `model_comparison_YYYYMMDD_HHMMSS.json`: Complete metrics in JSON format
 
+## 📊 Experiment Tracking with Weights & Biases
+
+Atlas integrates with [Weights & Biases](https://wandb.ai) for comprehensive experiment tracking and visualization.
+
+### Features
+
+- **Automated logging**: Metrics, hyperparameters, and model artifacts automatically logged
+- **Cross-validation tracking**: Per-fold metrics with step-based visualization
+- **Model versioning**: Complete model bundles uploaded as artifacts
+- **Team collaboration**: Shared workspace for team experiments (entity: `pgaitl`)
+
+### What Gets Logged
+
+#### Metrics
+- **Per-fold metrics**: MAE, RMSE, R², MAPE, MSE for each CV fold
+- **Summary metrics**: CV mean/std and overall performance metrics
+- **Model info**: Model size (MB), training time (seconds/minutes)
+
+#### Artifacts
+- Complete model bundles (model.joblib, encoders.joblib, model_card.json)
+- Model metadata with performance metrics
+
+#### Configuration
+- Model hyperparameters (XGBoost params)
+- Dataset information (samples, features)
+- Cross-validation setup (train/test periods, number of folds)
+
+### Usage
+
+```bash
+# Train with wandb logging (default)
+python train.py
+
+# Train specific model with wandb
+python train.py --only probability
+
+# Disable wandb logging
+python train.py --no-wandb
+
+# Quick test mode with wandb (uses subset of data)
+python train.py --quick-test --only probability
+```
+
+### Viewing Results
+
+Access your experiments at: `https://wandb.ai/pgaitl/atlas-ml`
+
+The wandb dashboard provides:
+- **Charts**: Time-series visualization of metrics across folds
+- **Runs table**: Summary metrics for easy comparison
+- **Artifacts**: Downloadable model bundles with metadata
+- **System metrics**: GPU/CPU usage, memory, training duration
+
+### Tags
+
+Runs are automatically tagged with:
+- Model type: `probability`, `price`, `weight`
+- Hardware: `gpu` or `cpu`
+- Platform: `windows`, `linux`, `darwin`
+- Mode: `quick-test` (if using --quick-test flag)
+- Cross-validation: `cv-7folds` (or actual number of folds)
+
+### Quick Test Mode
+
+For rapid iteration and testing:
+```bash
+python train.py --quick-test --only probability
+```
+
+Quick test mode:
+- Uses only 9 OD pairs (Catalan capitals combinations)
+- ~1800 records instead of 20M
+- Completes in ~1-2 minutes
+- Tagged with `quick-test` in wandb
+- Models saved with `quicktest_` prefix
+- Excluded from production model selection
+
 ## 📋 Future Roadmap
 
 - [ ] Enhanced data analytics and visualization
