@@ -38,3 +38,6 @@ temp/
 tmp/
 models/
 experiments/
+
+# Docker
+docker/data/
