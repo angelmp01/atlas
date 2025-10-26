@@ -209,7 +209,7 @@ class RegressionFeatureBuilder(FeatureBuilder):
         return df
 
 
-def build_probability_dataset(config: Config) -> pd.DataFrame:
+def build_probability_dataset(config: Config, quick_test: bool = False) -> pd.DataFrame:
     """
     Build complete dataset for probability training.
     
@@ -218,6 +218,7 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
     
     Args:
         config: Configuration object
+        quick_test: If True, filter to only a few OD pairs for fast testing
         
     Returns:
         Feature dataframe ready for probability model training
@@ -226,6 +227,8 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
     
     logger.info("=" * 70)
     logger.info("BUILDING PROBABILITY TRAINING DATASET")
+    if quick_test:
+        logger.info("*** QUICK TEST MODE: Using only 5 OD pairs ***")
     logger.info("=" * 70)
     logger.info("This process has 4 main steps:")
     logger.info("  1. Load raw data from database (~1-2 min)")
@@ -243,7 +246,8 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
     logger.info("\n[STEP 1/4] Loading raw data from database...")
     base_df = dataset_builder.build_base_dataset(
         start_date='2024-01-01',
-        end_date='2024-12-31'
+        end_date='2024-12-31',
+        od_pairs_filter=config.quick_test_od_pairs if quick_test else None
     )
     
     if base_df.empty:
@@ -279,12 +283,13 @@ def build_probability_dataset(config: Config) -> pd.DataFrame:
     return df
 
 
-def build_price_dataset(config: Config) -> pd.DataFrame:
+def build_price_dataset(config: Config, quick_test: bool = False) -> pd.DataFrame:
     """
     Build complete dataset for price regression training.
     
     Args:
         config: Configuration object
+        quick_test: If True, filter to only a few OD pairs for fast testing
         
     Returns:
         Feature dataframe ready for price model training
@@ -292,6 +297,8 @@ def build_price_dataset(config: Config) -> pd.DataFrame:
     from .io import create_database_manager, create_dataset_builder
     
     logger.info("Building price dataset")
+    if quick_test:
+        logger.info("*** QUICK TEST MODE: Using only 5 OD pairs ***")
     
     # Initialize data components
     db_manager = create_database_manager(config)
@@ -301,7 +308,8 @@ def build_price_dataset(config: Config) -> pd.DataFrame:
     # Load base dataset (all 2024 data)
     base_df = dataset_builder.build_base_dataset(
         start_date='2024-01-01',
-        end_date='2024-12-31'
+        end_date='2024-12-31',
+        od_pairs_filter=config.quick_test_od_pairs if quick_test else None
     )
     
     if base_df.empty:
@@ -317,12 +325,13 @@ def build_price_dataset(config: Config) -> pd.DataFrame:
     return df
 
 
-def build_weight_dataset(config: Config) -> pd.DataFrame:
+def build_weight_dataset(config: Config, quick_test: bool = False) -> pd.DataFrame:
     """
     Build complete dataset for weight regression training.
     
     Args:
         config: Configuration object
+        quick_test: If True, filter to only a few OD pairs for fast testing
         
     Returns:
         Feature dataframe ready for weight model training
@@ -330,6 +339,8 @@ def build_weight_dataset(config: Config) -> pd.DataFrame:
     from .io import create_database_manager, create_dataset_builder
     
     logger.info("Building weight dataset")
+    if quick_test:
+        logger.info("*** QUICK TEST MODE: Using only 5 OD pairs ***")
     
     # Initialize data components
     db_manager = create_database_manager(config)
@@ -339,7 +350,8 @@ def build_weight_dataset(config: Config) -> pd.DataFrame:
     # Load base dataset (all 2024 data)
     base_df = dataset_builder.build_base_dataset(
         start_date='2024-01-01',
-        end_date='2024-12-31'
+        end_date='2024-12-31',
+        od_pairs_filter=config.quick_test_od_pairs if quick_test else None
     )
     
     if base_df.empty:

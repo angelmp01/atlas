@@ -110,7 +110,7 @@ class ProbabilityEstimator:
             else:
                 return RandomForestRegressor(**self.config.model.rf_params)
     
-    def fit(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def fit(self, df: pd.DataFrame, wandb_logger=None) -> Dict[str, Any]:
         """
         Train probability model using daily trip counts with uniform distribution.
         
@@ -125,10 +125,14 @@ class ProbabilityEstimator:
         
         Args:
             df: DataFrame with daily aggregated data (columns: n_trips_daily or n_trips_logistic, ...)
+            wandb_logger: Optional WandbLogger for logging metrics
             
         Returns:
             Training results dictionary with CV metrics and feature names
         """
+        import time
+        start_time = time.time()
+        
         logger.info("Training probability model (daily counts + uniform distribution)")
         logger.info("Target variable: n_trips_logistic (freight vehicle count from database)")
         
@@ -177,13 +181,14 @@ class ProbabilityEstimator:
         self.model = self._create_model(self.config.model.probability_model_type, is_classifier=False)
         
         # Cross-validation for count model
-        cv = CrossValidator(self.config)
+        cv = CrossValidator(self.config, wandb_logger=wandb_logger)
         cv_results = cv.cross_validate_regressor(
             type(self.model),
             self.model.get_params(),
             X_scaled.assign(date=df_features['date']),
             y,
-            is_poisson=False  # Using log-transformed target with squared error
+            is_poisson=False,  # Using log-transformed target with squared error
+            task_name="probability"
         )
         
         # Final training on all data
@@ -197,14 +202,19 @@ class ProbabilityEstimator:
         # Store feature names
         self.feature_names = list(X_train.columns)
         
+        # Calculate training time
+        training_time_seconds = time.time() - start_time
+        
         logger.info(f"Training completed. MAE: {cv_results['overall_metrics'].get('mae', 'N/A'):.3f}")
+        logger.info(f"Training time: {training_time_seconds:.2f} seconds")
         logger.info("Note: Target was log-transformed (log1p) to handle heavy-tailed distribution")
         
         return {
             'cv_results': cv_results,
             'feature_names': self.feature_names,
             'training_samples': len(df),
-            'log_transformed': True  # Flag for inference to apply expm1
+            'log_transformed': True,  # Flag for inference to apply expm1
+            'training_time_seconds': training_time_seconds
         }
     
     def predict_probability(self, candidates: List[CandidateInput]) -> List[float]:
@@ -260,7 +270,7 @@ class ProbabilityEstimator:
         return daily_rates.tolist()
 
 
-def train_probability(config: Config) -> ModelBundle:
+def train_probability(config: Config, wandb_logger=None, quick_test: bool = False) -> ModelBundle:
     """
     Train probability estimation model.
     
@@ -269,6 +279,8 @@ def train_probability(config: Config) -> ModelBundle:
     
     Args:
         config: Configuration object
+        wandb_logger: Optional WandbLogger for logging metrics
+        quick_test: If True, use only a few OD pairs for fast testing
         
     Returns:
         Trained ModelBundle
@@ -277,7 +289,7 @@ def train_probability(config: Config) -> ModelBundle:
     
     # Build dataset
     try:
-        df = build_probability_dataset(config)
+        df = build_probability_dataset(config, quick_test=quick_test)
     except Exception as e:
         logger.error(f"Failed to build probability dataset: {e}")
         raise
@@ -289,7 +301,7 @@ def train_probability(config: Config) -> ModelBundle:
     estimator = ProbabilityEstimator(config)
     
     # Train (only one training mode supported)
-    training_results = estimator.fit(df)
+    training_results = estimator.fit(df, wandb_logger=wandb_logger)
     
     # Create model card
     model_card = create_model_card(
@@ -303,10 +315,39 @@ def train_probability(config: Config) -> ModelBundle:
         }
     )
     
+    # Log summary metrics to wandb
+    if wandb_logger:
+        wandb_logger.log_task_summary(
+            task="probability",
+            cv_metrics=training_results['cv_results']['cv_metrics'],
+            overall_metrics=training_results['cv_results']['overall_metrics'],
+            n_folds=training_results['cv_results']['n_folds']
+        )
+        
+        # Log hyperparameters
+        wandb_logger.log_hyperparameters(
+            estimator.model.get_params(),
+            prefix="probability/model_"
+        )
+        
+        # Log training time
+        wandb_logger.log_metrics({
+            "probability/training_time_seconds": training_results.get('training_time_seconds', 0),
+            "probability/training_time_minutes": training_results.get('training_time_seconds', 0) / 60
+        })
+        
+        # Log dataset info
+        wandb_logger.log_dataset_info({
+            "n_samples": training_results['training_samples'],
+            "n_features": len(estimator.feature_names),
+            "feature_names": estimator.feature_names[:20],  # First 20 to avoid too much data
+            "log_transformed": training_results.get('log_transformed', False)
+        })
+    
     # Save model bundle
     from .serialization import ModelVersionManager
     version_manager = ModelVersionManager(config.paths.models_dir)
-    bundle_path = version_manager.get_bundle_path('probability')
+    bundle_path = version_manager.get_bundle_path('probability', quick_test=quick_test)
     
     # Prepare artifacts
     if estimator.feature_builder is None:

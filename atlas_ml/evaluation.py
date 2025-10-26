@@ -248,14 +248,16 @@ class ModelEvaluator:
 class CrossValidator:
     """Handles cross-validation with temporal splits."""
     
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, wandb_logger=None):
         """
         Initialize cross-validator.
         
         Args:
             config: Configuration object
+            wandb_logger: Optional WandbLogger for logging metrics
         """
         self.config = config
+        self.wandb_logger = wandb_logger
         self.splitter = TemporalSplitter(
             train_months=config.training.cv_months_train,
             test_months=config.training.cv_months_test
@@ -377,7 +379,8 @@ class CrossValidator:
         X: pd.DataFrame,
         y: pd.Series,
         date_col: str = 'date',
-        is_poisson: bool = False
+        is_poisson: bool = False,
+        task_name: str = ""
     ) -> Dict[str, Any]:
         """
         Perform temporal cross-validation for regression.
@@ -389,6 +392,7 @@ class CrossValidator:
             y: Target vector
             date_col: Date column name
             is_poisson: Whether to compute Poisson-specific metrics
+            task_name: Task name for wandb logging (e.g., "probability", "price", "weight")
             
         Returns:
             Cross-validation results
@@ -444,6 +448,16 @@ class CrossValidator:
             fold_metrics['fold'] = fold_idx
             fold_metrics['train_size'] = len(train_idx)
             fold_metrics['test_size'] = len(test_idx)
+            
+            # Log fold metrics to wandb
+            logger.info(f"[DEBUG] wandb_logger={self.wandb_logger}, task_name='{task_name}'")
+            if self.wandb_logger and task_name:
+                logger.info(f"[DEBUG] Logging fold {fold_idx} metrics to wandb for task '{task_name}'")
+                self.wandb_logger.log_fold_metrics(
+                    fold=fold_idx,
+                    task=task_name,
+                    metrics=fold_metrics
+                )
             
             fold_results.append(fold_metrics)
             
