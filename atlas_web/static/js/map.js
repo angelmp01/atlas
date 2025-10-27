@@ -13,6 +13,7 @@ const API_BASE_URL = window.API_BASE_URL || 'http://127.0.0.1:8000';
 // Global map instance
 let map = null;
 let markers = {};
+let locations = []; // Store all locations for autocomplete
 
 /**
  * Initialize the application
@@ -34,6 +35,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Initialize buffer slider
     initBufferSlider();
     
+    // Initialize autocomplete fields
+    initAutocomplete('origin');
+    initAutocomplete('destination');
+    
     // Attach form handler
     document.getElementById('route-form').addEventListener('submit', handleFormSubmit);
 });
@@ -52,6 +57,128 @@ function initMap() {
     }).addTo(map);
     
     console.log('Map initialized');
+}
+
+/**
+ * Initialize autocomplete for a field
+ */
+function initAutocomplete(fieldId) {
+    const input = document.getElementById(fieldId);
+    const suggestionsDiv = document.getElementById(`${fieldId}-suggestions`);
+    let selectedIndex = -1;
+    let currentSuggestions = [];
+    
+    // Handle input changes
+    input.addEventListener('input', (e) => {
+        const query = e.target.value.trim().toLowerCase();
+        selectedIndex = -1;
+        
+        if (query.length === 0) {
+            suggestionsDiv.classList.remove('active');
+            return;
+        }
+        
+        // Filter locations
+        currentSuggestions = locations.filter(loc => 
+            loc.name.toLowerCase().includes(query)
+        );
+        
+        // Display suggestions
+        if (currentSuggestions.length > 0) {
+            suggestionsDiv.innerHTML = currentSuggestions.map((loc, index) => {
+                const highlightedName = highlightMatch(loc.name, query);
+                return `<div class="autocomplete-suggestion" data-index="${index}" data-id="${loc.id}" data-name="${loc.name}">
+                    ${highlightedName}
+                </div>`;
+            }).join('');
+            suggestionsDiv.classList.add('active');
+            
+            // Add click handlers
+            suggestionsDiv.querySelectorAll('.autocomplete-suggestion').forEach(div => {
+                div.addEventListener('click', () => {
+                    selectSuggestion(input, suggestionsDiv, div.dataset.id, div.dataset.name);
+                });
+            });
+        } else {
+            suggestionsDiv.innerHTML = '<div class="autocomplete-no-results">No se encontraron resultados</div>';
+            suggestionsDiv.classList.add('active');
+        }
+    });
+    
+    // Handle keyboard navigation
+    input.addEventListener('keydown', (e) => {
+        const suggestions = suggestionsDiv.querySelectorAll('.autocomplete-suggestion');
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, suggestions.length - 1);
+            updateSelectedSuggestion(suggestions, selectedIndex);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            updateSelectedSuggestion(suggestions, selectedIndex);
+        } else if (e.key === 'Enter' && selectedIndex >= 0) {
+            e.preventDefault();
+            const selected = suggestions[selectedIndex];
+            if (selected) {
+                selectSuggestion(input, suggestionsDiv, selected.dataset.id, selected.dataset.name);
+            }
+        } else if (e.key === 'Escape') {
+            suggestionsDiv.classList.remove('active');
+        }
+    });
+    
+    // Close suggestions when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !suggestionsDiv.contains(e.target)) {
+            suggestionsDiv.classList.remove('active');
+        }
+    });
+    
+    // Focus shows suggestions if there's text
+    input.addEventListener('focus', () => {
+        if (input.value.trim().length > 0) {
+            input.dispatchEvent(new Event('input'));
+        }
+    });
+}
+
+/**
+ * Highlight matching text in suggestion
+ */
+function highlightMatch(text, query) {
+    const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
+    return text.replace(regex, '<strong>$1</strong>');
+}
+
+/**
+ * Escape special regex characters
+ */
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Update selected suggestion highlight
+ */
+function updateSelectedSuggestion(suggestions, index) {
+    suggestions.forEach((s, i) => {
+        if (i === index) {
+            s.classList.add('selected');
+            s.scrollIntoView({ block: 'nearest' });
+        } else {
+            s.classList.remove('selected');
+        }
+    });
+}
+
+/**
+ * Select a suggestion
+ */
+function selectSuggestion(input, suggestionsDiv, locationId, locationName) {
+    input.value = locationName;
+    input.dataset.locationId = locationId;
+    suggestionsDiv.classList.remove('active');
 }
 
 /**
@@ -97,23 +224,11 @@ async function loadLocations() {
             throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
         }
         
-        const locations = await response.json();
+        locations = await response.json();
         console.log('Loaded locations:', locations);
         
-        // Populate origin and destination dropdowns
-        const originSelect = document.getElementById('origin');
-        const destinationSelect = document.getElementById('destination');
-        
-        originSelect.innerHTML = '<option value="">Seleccione origen...</option>';
-        destinationSelect.innerHTML = '<option value="">Seleccione destino...</option>';
-        
+        // Add markers to map
         locations.forEach(location => {
-            const option1 = new Option(location.name, location.id);
-            const option2 = new Option(location.name, location.id);
-            originSelect.add(option1);
-            destinationSelect.add(option2);
-            
-            // Add marker to map
             if (location.latitude && location.longitude) {
                 const marker = L.marker([location.latitude, location.longitude])
                     .bindPopup(`<b>${location.name}</b><br>ID: ${location.id}`)
@@ -170,18 +285,32 @@ async function handleFormSubmit(event) {
     const formData = new FormData(event.target);
     const data = Object.fromEntries(formData.entries());
     
+    // Get location IDs from data attributes
+    const originInput = document.getElementById('origin');
+    const destinationInput = document.getElementById('destination');
+    
+    const originId = originInput.dataset.locationId;
+    const destinationId = destinationInput.dataset.locationId;
+    
     console.log('Form data:', data);
+    console.log('Origin ID:', originId, 'Destination ID:', destinationId);
     
     // Validate
-    if (!data.origin || !data.destination) {
-        showStatus('Por favor, seleccione origen y destino', 'error');
+    if (!originId || !destinationId) {
+        showStatus('Por favor, seleccione origen y destino de la lista', 'error');
         return;
     }
     
-    if (data.origin === data.destination) {
+    if (originId === destinationId) {
         showStatus('Origen y destino deben ser diferentes', 'error');
         return;
     }
+    
+    // Update data with IDs
+    data.origin = originId;
+    data.destination = destinationId;
+    data.origin_name = originInput.value;
+    data.destination_name = destinationInput.value;
     
     // Show loading
     showStatus('Calculando ruta...', 'info');
@@ -193,7 +322,7 @@ async function handleFormSubmit(event) {
         // For now, just highlight the selected locations
         highlightRoute(data.origin, data.destination);
         
-        showStatus(`Ruta calculada: ${data.origin} → ${data.destination}`, 'success');
+        showStatus(`Ruta calculada: ${data.origin_name} → ${data.destination_name}`, 'success');
         
         // Show results
         displayResults(data);
@@ -274,8 +403,8 @@ function displayResults(data) {
     resultsDiv.innerHTML = `
         <h3>Parámetros de Búsqueda</h3>
         <ul>
-            <li><strong>Origen:</strong> ${data.origin}</li>
-            <li><strong>Destino:</strong> ${data.destination}</li>
+            <li><strong>Origen:</strong> ${data.origin_name}</li>
+            <li><strong>Destino:</strong> ${data.destination_name}</li>
             <li><strong>Tipo de Camión:</strong> ${data.truck_type}</li>
             <li><strong>Buffer:</strong> ${data.buffer} km</li>
             <li><strong>Fecha:</strong> ${data.date}</li>

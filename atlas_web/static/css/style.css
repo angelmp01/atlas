@@ -103,6 +103,7 @@ header p {
 }
 
 .form-group select,
+.form-group input[type="text"],
 .form-group input[type="number"],
 .form-group input[type="date"] {
     width: 100%;
@@ -117,6 +118,58 @@ header p {
 .form-group input:focus {
     outline: none;
     border-color: var(--secondary-color);
+}
+
+/* Autocomplete styles */
+.autocomplete-wrapper {
+    position: relative;
+}
+
+.autocomplete-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 2px solid var(--secondary-color);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.autocomplete-suggestions.active {
+    display: block;
+}
+
+.autocomplete-suggestion {
+    padding: 10px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.autocomplete-suggestion:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-suggestion:hover,
+.autocomplete-suggestion.selected {
+    background-color: #e8f4f8;
+}
+
+.autocomplete-suggestion strong {
+    color: var(--secondary-color);
+}
+
+.autocomplete-no-results {
+    padding: 10px;
+    color: #7f8c8d;
+    font-style: italic;
+    text-align: center;
 }
 
 /* Range slider styles */
