@@ -36,13 +36,6 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="goods-type">Tipo de Mercancía:</label>
-                        <select id="goods-type" name="goods_type" required>
-                            <option value="">Cargando...</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
                         <label for="truck-type">Tipo de Camión:</label>
                         <select id="truck-type" name="truck_type" required>
                             <option value="">Cargando...</option>
@@ -50,8 +43,13 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="buffer">Buffer (km):</label>
-                        <input type="number" id="buffer" name="buffer" value="50" min="1" max="500" required>
+                        <label for="buffer">Buffer (km): <span id="buffer-value">50</span></label>
+                        <input type="range" id="buffer" name="buffer" value="50" min="10" max="100" step="5" required>
+                        <div class="buffer-scale">
+                            <span>10</span>
+                            <span>50</span>
+                            <span>100</span>
+                        </div>
                         <small>Radio de búsqueda en kilómetros</small>
                     </div>
 

@@ -14,7 +14,7 @@ API_RELOAD = os.getenv("API_RELOAD", "true").lower() == "true"
 # Database Configuration (reuse existing config)
 DB_DSN = os.getenv(
     "PG_DSN", 
-    "postgresql://appuser:pgai1234@192.168.50.10:25432/gisdb"
+    "postgresql://appuser:pgai1234@lluissunol.duckdns.org:25432/gisdb"
 )
 
 # CORS Configuration (allow web frontend)

@@ -26,11 +26,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Load data from API
     await loadLocations();
-    await loadGoodsTypes();
     await loadTruckTypes();
     
     // Set default date to today
     document.getElementById('date').valueAsDate = new Date();
+    
+    // Initialize buffer slider
+    initBufferSlider();
     
     // Attach form handler
     document.getElementById('route-form').addEventListener('submit', handleFormSubmit);
@@ -50,6 +52,35 @@ function initMap() {
     }).addTo(map);
     
     console.log('Map initialized');
+}
+
+/**
+ * Initialize buffer range slider
+ */
+function initBufferSlider() {
+    const slider = document.getElementById('buffer');
+    const valueDisplay = document.getElementById('buffer-value');
+    
+    // Update display when slider changes
+    slider.addEventListener('input', (e) => {
+        valueDisplay.textContent = e.target.value;
+        updateSliderBackground(slider);
+    });
+    
+    // Initial background update
+    updateSliderBackground(slider);
+}
+
+/**
+ * Update slider background gradient based on value
+ */
+function updateSliderBackground(slider) {
+    const min = parseInt(slider.min);
+    const max = parseInt(slider.max);
+    const value = parseInt(slider.value);
+    const percentage = ((value - min) / (max - min)) * 100;
+    
+    slider.style.background = `linear-gradient(to right, var(--secondary-color) 0%, var(--secondary-color) ${percentage}%, var(--border-color) ${percentage}%, var(--border-color) 100%)`;
 }
 
 /**
@@ -96,37 +127,6 @@ async function loadLocations() {
     } catch (error) {
         console.error('Error loading locations:', error);
         showStatus(`❌ ERROR: ${error.message}`, 'error', 0);
-    }
-}
-
-/**
- * Load goods types from API and populate select dropdown
- */
-async function loadGoodsTypes() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/goods-types`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const goodsTypes = await response.json();
-        console.log('Loaded goods types:', goodsTypes);
-        
-        const select = document.getElementById('goods-type');
-        select.innerHTML = '<option value="">Seleccione tipo...</option>';
-        
-        goodsTypes.forEach(goods => {
-            const option = new Option(
-                `${goods.name} - ${goods.description}`,
-                goods.id
-            );
-            select.add(option);
-        });
-        
-    } catch (error) {
-        console.error('Error loading goods types:', error);
-        showStatus(`Error cargando tipos de mercancía: ${error.message}`, 'error');
     }
 }
 
@@ -276,7 +276,6 @@ function displayResults(data) {
         <ul>
             <li><strong>Origen:</strong> ${data.origin}</li>
             <li><strong>Destino:</strong> ${data.destination}</li>
-            <li><strong>Tipo de Mercancía:</strong> ${data.goods_type}</li>
             <li><strong>Tipo de Camión:</strong> ${data.truck_type}</li>
             <li><strong>Buffer:</strong> ${data.buffer} km</li>
             <li><strong>Fecha:</strong> ${data.date}</li>
