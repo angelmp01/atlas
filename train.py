@@ -209,13 +209,30 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ejemplos de uso:
+  # Entrenamiento básico
   python train.py                         # Entrena todos los modelos
   python train.py --only probability      # Solo probability
   python train.py --only price            # Solo price
   python train.py --only weight           # Solo weight
   python train.py --no-wandb              # Sin logging a wandb
-  python train.py --quick-test            # Quick test (5 OD pairs, ~1-2 min)
-  python train.py --quick-test --only probability  # Quick test solo probability
+  python train.py --quick-test            # Quick test (9 OD pairs, ~1-2 min)
+  
+  # Experimentación con hiperparámetros
+  python train.py --max-depth 15 --n-estimators 1000
+  python train.py --learning-rate 0.03 --max-depth 12
+  python train.py --max-depth 20 --n-estimators 2000 --learning-rate 0.01
+  
+  # Aumentar capacidad del modelo (más profundidad, más árboles)
+  python train.py --max-depth 15 --n-estimators 1000 --max-bin 512
+  
+  # Mayor regularización (prevenir overfitting)
+  python train.py --subsample 0.6 --colsample-bytree 0.6 --min-child-weight 3
+  
+  # Ver parámetros actuales
+  python train.py --show-xgb-params
+  
+  # Combo: quick test con parámetros custom
+  python train.py --quick-test --only probability --max-depth 8 --n-estimators 200
         """
     )
     
@@ -238,6 +255,62 @@ Ejemplos de uso:
         help='Quick test mode: train only on a few OD pairs (fast, for testing wandb/code)'
     )
     
+    # XGBoost hyperparameters
+    parser.add_argument(
+        '--max-depth',
+        type=int,
+        default=None,
+        help='Maximum tree depth for XGBoost (default: 10). Higher = more complex model. Range: 1-50'
+    )
+    
+    parser.add_argument(
+        '--learning-rate',
+        type=float,
+        default=None,
+        help='Learning rate for XGBoost (default: 0.05). Lower = slower but more stable. Range: 0.001-0.3'
+    )
+    
+    parser.add_argument(
+        '--n-estimators',
+        type=int,
+        default=None,
+        help='Number of boosting rounds for XGBoost (default: 500). More trees = more capacity. Range: 10-10000'
+    )
+    
+    parser.add_argument(
+        '--min-child-weight',
+        type=float,
+        default=None,
+        help='Minimum sum of instance weight in a child for XGBoost (default: 1). Higher = more conservative. Range: 0-100'
+    )
+    
+    parser.add_argument(
+        '--subsample',
+        type=float,
+        default=None,
+        help='Subsample ratio of training instances for XGBoost (default: 0.8). Lower = more regularization. Range: 0.1-1.0'
+    )
+    
+    parser.add_argument(
+        '--colsample-bytree',
+        type=float,
+        default=None,
+        help='Subsample ratio of columns for each tree for XGBoost (default: 0.8). Lower = more regularization. Range: 0.1-1.0'
+    )
+    
+    parser.add_argument(
+        '--max-bin',
+        type=int,
+        default=None,
+        help='Maximum number of bins for histogram-based XGBoost (default: 256). Higher = more precision. Range: 16-1024'
+    )
+    
+    parser.add_argument(
+        '--show-xgb-params',
+        action='store_true',
+        help='Show current XGBoost parameters and exit (useful to check defaults)'
+    )
+    
     args = parser.parse_args()
     
     # Crear directorio de logs si no existe
@@ -246,6 +319,77 @@ Ejemplos de uso:
     # Cargar configuracion
     logger.info("Cargando configuracion...")
     config = Config()
+    
+    # Override XGBoost parameters from CLI if provided
+    xgb_overrides = {}
+    if args.max_depth is not None:
+        if args.max_depth < 1 or args.max_depth > 50:
+            logger.error(f"Invalid --max-depth: {args.max_depth}. Must be in range [1, 50]")
+            return 1
+        if args.max_depth > 20:
+            logger.warning(f"⚠️  --max-depth={args.max_depth} is very high (>20). May cause overfitting.")
+        xgb_overrides['max_depth'] = args.max_depth
+    
+    if args.learning_rate is not None:
+        if args.learning_rate <= 0 or args.learning_rate > 0.3:
+            logger.error(f"Invalid --learning-rate: {args.learning_rate}. Must be in range (0, 0.3]")
+            return 1
+        if args.learning_rate > 0.2:
+            logger.warning(f"⚠️  --learning-rate={args.learning_rate} is very high (>0.2). May cause instability.")
+        xgb_overrides['learning_rate'] = args.learning_rate
+    
+    if args.n_estimators is not None:
+        if args.n_estimators < 10 or args.n_estimators > 10000:
+            logger.error(f"Invalid --n-estimators: {args.n_estimators}. Must be in range [10, 10000]")
+            return 1
+        if args.n_estimators > 5000:
+            logger.warning(f"⚠️  --n-estimators={args.n_estimators} is very high (>5000). Training will be slow.")
+        xgb_overrides['n_estimators'] = args.n_estimators
+    
+    if args.min_child_weight is not None:
+        if args.min_child_weight < 0 or args.min_child_weight > 100:
+            logger.error(f"Invalid --min-child-weight: {args.min_child_weight}. Must be in range [0, 100]")
+            return 1
+        xgb_overrides['min_child_weight'] = args.min_child_weight
+    
+    if args.subsample is not None:
+        if args.subsample < 0.1 or args.subsample > 1.0:
+            logger.error(f"Invalid --subsample: {args.subsample}. Must be in range [0.1, 1.0]")
+            return 1
+        xgb_overrides['subsample'] = args.subsample
+    
+    if args.colsample_bytree is not None:
+        if args.colsample_bytree < 0.1 or args.colsample_bytree > 1.0:
+            logger.error(f"Invalid --colsample-bytree: {args.colsample_bytree}. Must be in range [0.1, 1.0]")
+            return 1
+        xgb_overrides['colsample_bytree'] = args.colsample_bytree
+    
+    if args.max_bin is not None:
+        if args.max_bin < 16 or args.max_bin > 1024:
+            logger.error(f"Invalid --max-bin: {args.max_bin}. Must be in range [16, 1024]")
+            return 1
+        xgb_overrides['max_bin'] = args.max_bin
+    
+    # Apply XGBoost overrides to config
+    if xgb_overrides:
+        logger.info("="*60)
+        logger.info("XGBOOST PARAMETER OVERRIDES FROM CLI")
+        logger.info("="*60)
+        for param, value in xgb_overrides.items():
+            old_value = config.model.xgb_params.get(param, 'N/A')
+            config.model.xgb_params[param] = value
+            logger.info(f"  {param}: {old_value} -> {value}")
+        logger.info("="*60)
+    
+    # Show XGBoost params if requested
+    if args.show_xgb_params:
+        logger.info("="*60)
+        logger.info("CURRENT XGBOOST PARAMETERS")
+        logger.info("="*60)
+        for param, value in sorted(config.model.xgb_params.items()):
+            logger.info(f"  {param}: {value}")
+        logger.info("="*60)
+        return 0
     
     # Initialize wandb logger
     wandb_logger = None
@@ -258,6 +402,10 @@ Ejemplos de uso:
             # Add quick-test tag if enabled
             if args.quick_test:
                 tags.append('quick-test')
+            
+            # Add custom-hyperparams tag if any override was used
+            if xgb_overrides:
+                tags.append('custom-hyperparams')
             
             # Get XGBoost params
             xgb_params = config.model.xgb_params
@@ -283,13 +431,16 @@ Ejemplos de uso:
                         "n_estimators": xgb_params.get('n_estimators', 500),
                         "max_depth": xgb_params.get('max_depth', 10),
                         "learning_rate": xgb_params.get('learning_rate', 0.05),
+                        "min_child_weight": xgb_params.get('min_child_weight', 1),
                         "subsample": xgb_params.get('subsample', 0.8),
-                        "colsample_bytree": xgb_params.get('colsample_bytree', 0.8)
+                        "colsample_bytree": xgb_params.get('colsample_bytree', 0.8),
+                        "max_bin": xgb_params.get('max_bin', 256),
                     },
                     "cv": {
                         "months_train": config.training.cv_months_train,
                         "months_test": config.training.cv_months_test
-                    }
+                    },
+                    "cli_overrides": xgb_overrides  # Track which params were overridden
                 },
                 enabled=True
             )
