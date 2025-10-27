@@ -14,6 +14,7 @@ const API_BASE_URL = window.API_BASE_URL || 'http://127.0.0.1:8000';
 let map = null;
 let markers = {};
 let locations = []; // Store all locations for autocomplete
+let infoControl = null; // Info panel for hover
 
 /**
  * Initialize the application
@@ -54,6 +55,23 @@ function initMap() {
         attribution: '© OpenStreetMap contributors',
         maxZoom: 18,
     }).addTo(map);
+    
+    // Add info control (bottom-right corner)
+    infoControl = L.control({position: 'bottomright'});
+    
+    infoControl.onAdd = function(map) {
+        this._div = L.DomUtil.create('div', 'map-info');
+        this.update();
+        return this._div;
+    };
+    
+    infoControl.update = function(location) {
+        this._div.innerHTML = '<h4>Información</h4>' + (location ?
+            '<b>' + location.name + '</b><br/>ID: ' + location.id
+            : 'Pasa el cursor sobre una localización');
+    };
+    
+    infoControl.addTo(map);
     
     console.log('Map initialized');
 }
@@ -226,13 +244,41 @@ async function loadLocations() {
         locations = await response.json();
         console.log('Loaded locations:', locations);
         
-        // Add markers to map
+        // Add circle markers to map
         locations.forEach(location => {
             if (location.latitude && location.longitude) {
-                const marker = L.marker([location.latitude, location.longitude])
-                    .bindPopup(`<b>${location.name}</b><br>ID: ${location.id}`)
-                    .addTo(map);
-                markers[location.id] = marker;
+                const circle = L.circleMarker([location.latitude, location.longitude], {
+                    radius: 4,
+                    fillColor: '#3498db',
+                    color: '#2980b9',
+                    weight: 1,
+                    opacity: 0.8,
+                    fillOpacity: 0.6
+                }).addTo(map);
+                
+                // Add hover events
+                circle.on('mouseover', function(e) {
+                    this.setStyle({
+                        radius: 6,
+                        fillOpacity: 0.9,
+                        weight: 2
+                    });
+                    infoControl.update(location);
+                });
+                
+                circle.on('mouseout', function(e) {
+                    this.setStyle({
+                        radius: 4,
+                        fillOpacity: 0.6,
+                        weight: 1
+                    });
+                    infoControl.update();
+                });
+                
+                // Add click to show popup
+                circle.bindPopup(`<b>${location.name}</b><br>ID: ${location.id}`);
+                
+                markers[location.id] = circle;
             }
         });
         
@@ -309,33 +355,37 @@ async function handleFormSubmit(event) {
  */
 function highlightRoute(originId, destinationId) {
     // Reset all markers to default
-    Object.values(markers).forEach(marker => {
-        marker.setIcon(new L.Icon.Default());
+    Object.values(markers).forEach(circle => {
+        circle.setStyle({
+            radius: 4,
+            fillColor: '#3498db',
+            color: '#2980b9',
+            weight: 1,
+            fillOpacity: 0.6
+        });
     });
     
     // Highlight origin (green)
     if (markers[originId]) {
-        markers[originId].setIcon(L.icon({
-            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
-            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-            iconSize: [25, 41],
-            iconAnchor: [12, 41],
-            popupAnchor: [1, -34],
-            shadowSize: [41, 41]
-        }));
+        markers[originId].setStyle({
+            radius: 8,
+            fillColor: '#27ae60',
+            color: '#229954',
+            weight: 2,
+            fillOpacity: 0.9
+        });
         markers[originId].openPopup();
     }
     
     // Highlight destination (red)
     if (markers[destinationId]) {
-        markers[destinationId].setIcon(L.icon({
-            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
-            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-            iconSize: [25, 41],
-            iconAnchor: [12, 41],
-            popupAnchor: [1, -34],
-            shadowSize: [41, 41]
-        }));
+        markers[destinationId].setStyle({
+            radius: 8,
+            fillColor: '#e74c3c',
+            color: '#c0392b',
+            weight: 2,
+            fillOpacity: 0.9
+        });
     }
     
     // Draw line between origin and destination

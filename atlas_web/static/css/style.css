@@ -402,6 +402,30 @@ header p {
     border: 2px solid var(--border-color);
 }
 
+/* Map info panel */
+.map-info {
+    padding: 10px 15px;
+    background: white;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    border: 2px solid var(--secondary-color);
+    min-width: 200px;
+}
+
+.map-info h4 {
+    margin: 0 0 8px 0;
+    color: var(--primary-color);
+    font-size: 0.95em;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 5px;
+}
+
+.map-info b {
+    color: var(--secondary-color);
+    font-size: 1.05em;
+}
+
 /* Responsive design */
 @media (max-width: 1024px) {
     body {
