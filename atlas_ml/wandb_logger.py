@@ -121,17 +121,19 @@ class WandbLogger:
             if key not in ['fold', 'train_size', 'test_size']  # Exclude metadata
         }
         
-        # Add fold number explicitly for X-axis
-        fold_metrics['fold'] = fold
+        # Add fold number with prefix to avoid conflicts between tasks
+        fold_metric_name = f"{prefix}fold"
+        fold_metrics[fold_metric_name] = fold
         
-        # Define X-axis as "fold" for these metrics (wandb will use it as X-axis)
+        # Define X-axis as task-specific "fold" for these metrics
         if fold == 0:  # Only define once, on first fold
             for metric_name in fold_metrics.keys():
-                if metric_name != 'fold':
-                    wandb.define_metric(f"{prefix}{metric_name}", step_metric=f"{prefix}fold")
+                if metric_name != fold_metric_name:
+                    wandb.define_metric(f"{prefix}{metric_name}", step_metric=fold_metric_name)
         
-        # Log with fold as step - this creates time series
-        self.log_metrics(fold_metrics, step=fold, prefix=prefix)
+        # Log metrics - wandb will use the fold_metric_name as X-axis
+        # No need to pass step parameter, wandb will use the fold metric value
+        self.log_metrics(fold_metrics, prefix="")
     
     def log_task_summary(
         self,
