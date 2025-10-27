@@ -125,6 +125,49 @@ header p {
     position: relative;
 }
 
+.input-with-clear {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.input-with-clear input {
+    flex: 1;
+    padding-right: 40px;
+}
+
+.clear-btn {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.clear-btn:hover {
+    background-color: #f0f0f0;
+}
+
+.clear-btn svg {
+    width: 20px;
+    height: 20px;
+    color: #7f8c8d;
+}
+
+.clear-btn:hover svg {
+    color: var(--danger-color);
+}
+
+.input-with-clear input:not(:placeholder-shown) + .clear-btn {
+    display: flex;
+}
+
 .autocomplete-suggestions {
     position: absolute;
     top: 100%;

@@ -39,6 +39,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     initAutocomplete('origin');
     initAutocomplete('destination');
     
+    // Initialize clear buttons
+    initClearButtons();
+    
     // Attach form handler
     document.getElementById('route-form').addEventListener('submit', handleFormSubmit);
 });
@@ -74,6 +77,204 @@ function initMap() {
     infoControl.addTo(map);
     
     console.log('Map initialized');
+}
+
+/**
+ * Initialize clear buttons for origin and destination
+ */
+function initClearButtons() {
+    const clearOrigin = document.getElementById('clear-origin');
+    const clearDestination = document.getElementById('clear-destination');
+    const originInput = document.getElementById('origin');
+    const destinationInput = document.getElementById('destination');
+    
+    clearOrigin.addEventListener('click', () => {
+        originInput.value = '';
+        delete originInput.dataset.locationId;
+        
+        // If destination is still selected, show all markers and keep destination highlighted
+        const destinationId = destinationInput.dataset.locationId;
+        showAllMarkers();
+        
+        if (destinationId && markers[destinationId]) {
+            markers[destinationId].setStyle({
+                radius: 8,
+                fillColor: '#e74c3c',
+                color: '#c0392b',
+                weight: 2,
+                fillOpacity: 0.9,
+                opacity: 1
+            });
+        }
+    });
+    
+    clearDestination.addEventListener('click', () => {
+        destinationInput.value = '';
+        delete destinationInput.dataset.locationId;
+        
+        // If origin is still selected, show all markers and keep origin highlighted
+        const originId = originInput.dataset.locationId;
+        showAllMarkers();
+        
+        if (originId && markers[originId]) {
+            markers[originId].setStyle({
+                radius: 8,
+                fillColor: '#27ae60',
+                color: '#229954',
+                weight: 2,
+                fillOpacity: 0.9,
+                opacity: 1
+            });
+        }
+    });
+}
+
+/**
+ * Show all markers on the map
+ */
+function showAllMarkers() {
+    Object.values(markers).forEach(circle => {
+        circle.setStyle({ 
+            radius: 4,
+            fillColor: '#3498db',
+            color: '#2980b9',
+            weight: 1,
+            opacity: 0.8, 
+            fillOpacity: 0.6 
+        });
+    });
+    
+    // Remove route line if exists
+    if (window.routeLine) {
+        map.removeLayer(window.routeLine);
+        window.routeLine = null;
+    }
+}
+
+/**
+ * Hide all markers except specified ones
+ */
+function hideMarkersExcept(exceptIds = []) {
+    Object.entries(markers).forEach(([id, circle]) => {
+        if (exceptIds.includes(id)) {
+            circle.setStyle({ opacity: 1, fillOpacity: 0.9 });
+        } else {
+            circle.setStyle({ opacity: 0, fillOpacity: 0 });
+        }
+    });
+}
+
+/**
+ * Update route display when both origin and destination are selected
+ */
+function updateRouteDisplay() {
+    const originInput = document.getElementById('origin');
+    const destinationInput = document.getElementById('destination');
+    
+    const originId = originInput.dataset.locationId;
+    const destinationId = destinationInput.dataset.locationId;
+    
+    // Only proceed if both are selected
+    if (!originId || !destinationId) {
+        return;
+    }
+    
+    // Hide all markers except origin and destination
+    hideMarkersExcept([originId, destinationId]);
+    
+    // Highlight origin in green
+    if (markers[originId]) {
+        markers[originId].setStyle({
+            radius: 8,
+            fillColor: '#27ae60',
+            color: '#229954',
+            weight: 2,
+            fillOpacity: 0.9,
+            opacity: 1
+        });
+    }
+    
+    // Highlight destination in red
+    if (markers[destinationId]) {
+        markers[destinationId].setStyle({
+            radius: 8,
+            fillColor: '#e74c3c',
+            color: '#c0392b',
+            weight: 2,
+            fillOpacity: 0.9,
+            opacity: 1
+        });
+    }
+    
+    // Draw route line
+    const originLatLng = markers[originId].getLatLng();
+    const destLatLng = markers[destinationId].getLatLng();
+    
+    if (window.routeLine) {
+        map.removeLayer(window.routeLine);
+    }
+    
+    window.routeLine = L.polyline([originLatLng, destLatLng], {
+        color: '#3498db',
+        weight: 3,
+        opacity: 0.7,
+        dashArray: '10, 10'
+    }).addTo(map);
+    
+    // Fit map to show both markers
+    const bounds = L.latLngBounds([originLatLng, destLatLng]);
+    map.fitBounds(bounds, { padding: [50, 50] });
+}
+
+/**
+ * Select location in form field (origin or destination)
+ */
+function selectLocationOnMap(location) {
+    const originInput = document.getElementById('origin');
+    const destinationInput = document.getElementById('destination');
+    
+    // If origin is not set, set it
+    if (!originInput.dataset.locationId) {
+        originInput.value = location.name;
+        originInput.dataset.locationId = location.id;
+        
+        // Keep all markers visible, just highlight origin in green
+        if (markers[location.id]) {
+            markers[location.id].setStyle({
+                radius: 8,
+                fillColor: '#27ae60',
+                color: '#229954',
+                weight: 2,
+                fillOpacity: 0.9,
+                opacity: 1
+            });
+        }
+        
+        showStatus('✅ Origen seleccionado. Ahora selecciona el destino.', 'success', 3000);
+        
+        // Check if destination is already set
+        updateRouteDisplay();
+    }
+    // If origin is set but destination is not, set destination
+    else if (!destinationInput.dataset.locationId) {
+        // Don't allow same location
+        if (location.id === originInput.dataset.locationId) {
+            showStatus('⚠️ El destino debe ser diferente al origen', 'warning', 3000);
+            return;
+        }
+        
+        destinationInput.value = location.name;
+        destinationInput.dataset.locationId = location.id;
+        
+        showStatus('✅ Destino seleccionado. Puedes calcular la ruta.', 'success', 3000);
+        
+        // Update route display (hide markers, draw line, zoom)
+        updateRouteDisplay();
+    }
+    // Both are set, do nothing or show message
+    else {
+        showStatus('ℹ️ Origen y destino ya están seleccionados. Usa el icono de basura para cambiar.', 'info', 3000);
+    }
 }
 
 /**
@@ -196,6 +397,44 @@ function selectSuggestion(input, suggestionsDiv, locationId, locationName) {
     input.value = locationName;
     input.dataset.locationId = locationId;
     suggestionsDiv.classList.remove('active');
+    
+    // Update map markers visibility
+    const originInput = document.getElementById('origin');
+    const destinationInput = document.getElementById('destination');
+    
+    const originId = originInput.dataset.locationId;
+    const destinationId = destinationInput.dataset.locationId;
+    
+    if (originId && destinationId) {
+        // Validate they are different
+        if (originId === destinationId) {
+            // Revert the change
+            input.value = '';
+            delete input.dataset.locationId;
+            showStatus('⚠️ El destino debe ser diferente al origen', 'warning', 3000);
+            return;
+        }
+        
+        // Both selected, use centralized function
+        updateRouteDisplay();
+        
+    } else if (originId) {
+        // Only origin selected, keep all markers visible but highlight origin
+        showAllMarkers(); // Reset all
+        if (markers[originId]) {
+            markers[originId].setStyle({
+                radius: 8,
+                fillColor: '#27ae60',
+                color: '#229954',
+                weight: 2,
+                fillOpacity: 0.9,
+                opacity: 1
+            });
+        }
+    } else {
+        // Nothing selected, show all
+        showAllMarkers();
+    }
 }
 
 /**
@@ -267,16 +506,27 @@ async function loadLocations() {
                 });
                 
                 circle.on('mouseout', function(e) {
-                    this.setStyle({
-                        radius: 4,
-                        fillOpacity: 0.6,
-                        weight: 1
-                    });
+                    // Check if this is a selected marker
+                    const originInput = document.getElementById('origin');
+                    const destinationInput = document.getElementById('destination');
+                    const isSelected = (originInput.dataset.locationId === location.id) || 
+                                      (destinationInput.dataset.locationId === location.id);
+                    
+                    if (!isSelected) {
+                        this.setStyle({
+                            radius: 4,
+                            fillOpacity: 0.6,
+                            weight: 1
+                        });
+                    }
                     infoControl.update();
                 });
                 
-                // Add click to show popup
-                circle.bindPopup(`<b>${location.name}</b><br>ID: ${location.id}`);
+                // Add click event to select location
+                circle.on('click', function(e) {
+                    selectLocationOnMap(location);
+                    L.DomEvent.stopPropagation(e);
+                });
                 
                 markers[location.id] = circle;
             }
