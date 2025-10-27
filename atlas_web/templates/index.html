@@ -22,34 +22,58 @@
                 
                 <form id="route-form">
                     <div class="form-group autocomplete-wrapper">
-                        <label for="origin">Origen:</label>
                         <input 
                             type="text" 
                             id="origin" 
                             name="origin" 
-                            placeholder="Escribe para buscar..."
+                            placeholder="Escribe tu origen..."
                             autocomplete="off"
                             required>
                         <div id="origin-suggestions" class="autocomplete-suggestions"></div>
                     </div>
 
                     <div class="form-group autocomplete-wrapper">
-                        <label for="destination">Destino:</label>
                         <input 
                             type="text" 
                             id="destination" 
                             name="destination" 
-                            placeholder="Escribe para buscar..."
+                            placeholder="Escribe tu destino..."
                             autocomplete="off"
                             required>
                         <div id="destination-suggestions" class="autocomplete-suggestions"></div>
                     </div>
 
                     <div class="form-group">
-                        <label for="truck-type">Tipo de Camión:</label>
-                        <select id="truck-type" name="truck_type" required>
-                            <option value="">Cargando...</option>
-                        </select>
+                        <label>Tipo de Camión:</label>
+                        <div class="radio-cards">
+                            <label class="radio-card">
+                                <input type="radio" name="truck_type" value="normal" checked>
+                                <div class="radio-card-content">
+                                    <span class="radio-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="1" y="3" width="15" height="13" rx="2"/>
+                                            <path d="M16 8h2.667C19.403 8 20 8.597 20 9.333v3.334c0 .736-.597 1.333-1.333 1.333H16"/>
+                                            <circle cx="5.5" cy="18.5" r="2.5"/>
+                                            <circle cx="18.5" cy="18.5" r="2.5"/>
+                                            <path d="M5.5 16V6m13 10v-2"/>
+                                        </svg>
+                                    </span>
+                                    <span class="radio-card-title">Normal</span>
+                                </div>
+                            </label>
+                            <label class="radio-card">
+                                <input type="radio" name="truck_type" value="refrigerated">
+                                <div class="radio-card-content">
+                                    <span class="radio-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M12 2v20M17 7l-5 5-5-5M7 17l5-5 5 5"/>
+                                            <path d="M3 12h3m12 0h3M5 5l2 2m10 10l2 2M5 19l2-2m10-10l2-2"/>
+                                        </svg>
+                                    </span>
+                                    <span class="radio-card-title">Refrigerado</span>
+                                </div>
+                            </label>
+                        </div>
                     </div>
 
                     <div class="form-group">

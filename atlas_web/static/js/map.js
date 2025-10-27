@@ -27,7 +27,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Load data from API
     await loadLocations();
-    await loadTruckTypes();
     
     // Set default date to today
     document.getElementById('date').valueAsDate = new Date();
@@ -246,37 +245,6 @@ async function loadLocations() {
 }
 
 /**
- * Load truck types from API and populate select dropdown
- */
-async function loadTruckTypes() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/goods-types/truck-types`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const truckTypes = await response.json();
-        console.log('Loaded truck types:', truckTypes);
-        
-        const select = document.getElementById('truck-type');
-        select.innerHTML = '<option value="">Seleccione tipo...</option>';
-        
-        truckTypes.forEach(truck => {
-            const option = new Option(
-                `${truck.name} - ${truck.description}`,
-                truck.id
-            );
-            select.add(option);
-        });
-        
-    } catch (error) {
-        console.error('Error loading truck types:', error);
-        showStatus(`Error cargando tipos de camión: ${error.message}`, 'error');
-    }
-}
-
-/**
  * Handle form submission
  */
 async function handleFormSubmit(event) {
@@ -400,12 +368,15 @@ function highlightRoute(originId, destinationId) {
 function displayResults(data) {
     const resultsDiv = document.getElementById('results');
     
+    // Format truck type
+    const truckType = data.truck_type === 'refrigerated' ? '❄ Refrigerado' : '🚚 Normal';
+    
     resultsDiv.innerHTML = `
         <h3>Parámetros de Búsqueda</h3>
         <ul>
             <li><strong>Origen:</strong> ${data.origin_name}</li>
             <li><strong>Destino:</strong> ${data.destination_name}</li>
-            <li><strong>Tipo de Camión:</strong> ${data.truck_type}</li>
+            <li><strong>Tipo de Camión:</strong> ${truckType}</li>
             <li><strong>Buffer:</strong> ${data.buffer} km</li>
             <li><strong>Fecha:</strong> ${data.date}</li>
         </ul>
