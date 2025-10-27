@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATLAS - Logistics Optimization</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚛 ATLAS Logistics Platform</h1>
+            <p>Optimización de rutas de transporte por carretera</p>
+        </header>
+
+        <div class="content">
+            <!-- Form Section -->
+            <div class="form-section">
+                <h2>Parámetros de Ruta</h2>
+                
+                <form id="route-form">
+                    <div class="form-group">
+                        <label for="origin">Origen:</label>
+                        <select id="origin" name="origin" required>
+                            <option value="">Cargando...</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="destination">Destino:</label>
+                        <select id="destination" name="destination" required>
+                            <option value="">Cargando...</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="goods-type">Tipo de Mercancía:</label>
+                        <select id="goods-type" name="goods_type" required>
+                            <option value="">Cargando...</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="truck-type">Tipo de Camión:</label>
+                        <select id="truck-type" name="truck_type" required>
+                            <option value="">Cargando...</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="buffer">Buffer (km):</label>
+                        <input type="number" id="buffer" name="buffer" value="50" min="1" max="500" required>
+                        <small>Radio de búsqueda en kilómetros</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="date">Fecha:</label>
+                        <input type="date" id="date" name="date" required>
+                    </div>
+
+                    <button type="submit" class="btn-calculate">
+                        🔍 Calcular Ruta
+                    </button>
+                </form>
+
+                <div id="status" class="status-message"></div>
+                <div id="results" class="results"></div>
+            </div>
+
+            <!-- Map Section -->
+            <div class="map-section">
+                <h2>Mapa de Rutas</h2>
+                <div id="map"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Main JS -->
+    <script>
+        // Pass API base URL to JavaScript
+        window.API_BASE_URL = "{{ api_base_url }}";
+    </script>
+    <script src="{{ url_for('static', path='/js/map.js') }}"></script>
+</body>
+</html>
