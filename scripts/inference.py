@@ -493,7 +493,7 @@ Examples:
         print("\n" + "="*60)
         print("PREDICTION RESULTS")
         print("="*60)
-        print(f"Route: {result['origin_id']} -> {result['destination_id']}")
+        print(f"Route: {result['origin_id']:05d} -> {result['destination_id']:05d}")
         print(f"Date: {result['date']}")
         print(f"Truck type: {result['truck_type']}")
         print(f"Merchandise: {result['tipo_mercancia']}")
