@@ -68,10 +68,26 @@ function initMap() {
         return this._div;
     };
     
-    infoControl.update = function(location) {
-        this._div.innerHTML = '<h4>Información</h4>' + (location ?
-            '<b>' + location.name + '</b><br/>ID: ' + location.id
-            : 'Pasa el cursor sobre una localización');
+    infoControl.update = function(data) {
+        if (!data) {
+            this._div.innerHTML = '<h4>Información</h4>Pasa el cursor sobre una localización';
+        } else if (data.type === 'route') {
+            // Show route information
+            this._div.innerHTML = `
+                <h4>🗺️ Ruta Calculada</h4>
+                <div style="line-height: 1.6;">
+                    <strong>Origen:</strong> ${data.origin}<br/>
+                    <strong>Destino:</strong> ${data.destination}<br/>
+                    <hr style="margin: 8px 0; border: none; border-top: 1px solid #ddd;">
+                    <strong>Distancia:</strong> ${data.distance} km<br/>
+                    <strong>Tiempo:</strong> ${data.time}<br/>
+                    <strong>Segmentos:</strong> ${data.segments}
+                </div>
+            `;
+        } else {
+            // Show location information (on hover)
+            this._div.innerHTML = '<h4>Información</h4><b>' + data.name + '</b><br/>ID: ' + data.id;
+        }
     };
     
     infoControl.addTo(map);
@@ -206,24 +222,8 @@ function updateRouteDisplay() {
         });
     }
     
-    // Draw route line
-    const originLatLng = markers[originId].getLatLng();
-    const destLatLng = markers[destinationId].getLatLng();
-    
-    if (window.routeLine) {
-        map.removeLayer(window.routeLine);
-    }
-    
-    window.routeLine = L.polyline([originLatLng, destLatLng], {
-        color: '#3498db',
-        weight: 3,
-        opacity: 0.7,
-        dashArray: '10, 10'
-    }).addTo(map);
-    
-    // Fit map to show both markers
-    const bounds = L.latLngBounds([originLatLng, destLatLng]);
-    map.fitBounds(bounds, { padding: [50, 50] });
+    // Draw route from API
+    drawRouteFromAPI(originId, destinationId);
 }
 
 /**
@@ -638,27 +638,9 @@ function highlightRoute(originId, destinationId) {
         });
     }
     
-    // Draw line between origin and destination
+    // Draw route from API
     if (markers[originId] && markers[destinationId]) {
-        const originLatLng = markers[originId].getLatLng();
-        const destLatLng = markers[destinationId].getLatLng();
-        
-        // Remove previous route line
-        if (window.routeLine) {
-            map.removeLayer(window.routeLine);
-        }
-        
-        // Draw new route line
-        window.routeLine = L.polyline([originLatLng, destLatLng], {
-            color: '#3498db',
-            weight: 3,
-            opacity: 0.7,
-            dashArray: '10, 10'
-        }).addTo(map);
-        
-        // Fit map to show both markers
-        const bounds = L.latLngBounds([originLatLng, destLatLng]);
-        map.fitBounds(bounds, { padding: [50, 50] });
+        drawRouteFromAPI(originId, destinationId);
     }
 }
 
@@ -685,7 +667,7 @@ function displayResults(data) {
 }
 
 /**
- * Show status message
+ * Show status notification (top bar)
  * @param {string} message - Message to display
  * @param {string} type - Type: 'info', 'success', 'error', 'warning'
  * @param {number} timeout - Auto-hide timeout in ms (0 = no auto-hide)
@@ -693,7 +675,7 @@ function displayResults(data) {
 function showStatus(message, type = 'info', timeout = null) {
     const statusDiv = document.getElementById('status');
     statusDiv.textContent = message;
-    statusDiv.className = `status-message ${type}`;
+    statusDiv.className = `status-notification ${type}`;
     
     // Clear any existing timeout
     if (statusDiv.hideTimeout) {
@@ -708,13 +690,128 @@ function showStatus(message, type = 'info', timeout = null) {
 }
 
 /**
- * Hide status message
+ * Hide status notification
  */
 function hideStatus() {
     const statusDiv = document.getElementById('status');
-    statusDiv.className = 'status-message';
+    statusDiv.className = 'status-notification';
     if (statusDiv.hideTimeout) {
         clearTimeout(statusDiv.hideTimeout);
         statusDiv.hideTimeout = null;
+    }
+}
+
+/**
+ * Draw route from API using pgRouting
+ * @param {string} originId - Origin location ID
+ * @param {string} destinationId - Destination location ID
+ */
+async function drawRouteFromAPI(originId, destinationId) {
+    try {
+        // Show loading status
+        showStatus('Calculando ruta...', 'info');
+        
+        // Remove previous route line if exists
+        if (window.routeLine) {
+            map.removeLayer(window.routeLine);
+            window.routeLine = null;
+        }
+        
+        // Call route API
+        const response = await fetch(
+            `${API_BASE_URL}/route?origin_id=${originId}&destination_id=${destinationId}`
+        );
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Error al calcular la ruta');
+        }
+        
+        const routeData = await response.json();
+        
+        // Extract coordinates from GeoJSON geometries
+        const routeCoordinates = [];
+        
+        for (const segment of routeData.segments) {
+            if (segment.geometry) {
+                const geom = JSON.parse(segment.geometry);
+                
+                // GeoJSON uses [lon, lat] format, Leaflet uses [lat, lon]
+                if (geom.type === 'LineString') {
+                    const coords = geom.coordinates.map(coord => [coord[1], coord[0]]);
+                    routeCoordinates.push(...coords);
+                } else if (geom.type === 'Point') {
+                    routeCoordinates.push([geom.coordinates[1], geom.coordinates[0]]);
+                }
+            }
+        }
+        
+        if (routeCoordinates.length === 0) {
+            throw new Error('No se encontraron coordenadas de ruta');
+        }
+        
+        // Draw route polyline
+        window.routeLine = L.polyline(routeCoordinates, {
+            color: '#3498db',
+            weight: 4,
+            opacity: 0.8
+        }).addTo(map);
+        
+        // Add tooltip with time and distance (always visible, like Google Maps)
+        const hours = Math.floor(routeData.summary.total_time_minutes / 60);
+        const minutes = Math.round(routeData.summary.total_time_minutes % 60);
+        const timeText = hours > 0 ? `${hours} h ${minutes} min` : `${minutes} min`;
+        
+        const tooltipContent = `
+            <div style="background: white; padding: 6px 10px; border-radius: 4px; border: 2px solid #3498db; box-shadow: 0 2px 4px rgba(0,0,0,0.2); font-weight: 600; text-align: center; line-height: 1.4;">
+                <div style="color: #3498db; font-size: 14px;">${timeText}</div>
+                <div style="color: #555; font-size: 12px;">${routeData.summary.total_distance_km} km</div>
+            </div>
+        `;
+        
+        // Place tooltip at midpoint of route
+        const midPoint = Math.floor(routeCoordinates.length / 2);
+        const tooltipLatLng = routeCoordinates[midPoint];
+        
+        window.routeLine.bindTooltip(tooltipContent, {
+            permanent: true,
+            direction: 'center',
+            className: 'route-tooltip',
+            offset: [0, 0]
+        }).openTooltip();
+        
+        // Update info control with route details
+        infoControl.update({
+            type: 'route',
+            origin: routeData.origin.name,
+            destination: routeData.destination.name,
+            distance: routeData.summary.total_distance_km,
+            time: timeText,
+            segments: routeData.summary.total_segments
+        });
+        
+        // Fit map to show entire route
+        map.fitBounds(window.routeLine.getBounds(), { padding: [50, 50] });
+        
+        // Show success message
+        showStatus(
+            `Ruta calculada: ${routeData.summary.total_distance_km} km, ${routeData.summary.total_time_minutes} min`,
+            'success',
+            5000
+        );
+        
+        console.log('Route drawn:', routeData.summary);
+        
+    } catch (error) {
+        console.error('Error drawing route:', error);
+        showStatus(`Error al dibujar la ruta: ${error.message}`, 'error', 0);
+        
+        // Fallback: just fit map to show both markers
+        if (markers[originId] && markers[destinationId]) {
+            const originLatLng = markers[originId].getLatLng();
+            const destLatLng = markers[destinationId].getLatLng();
+            const bounds = L.latLngBounds([originLatLng, destLatLng]);
+            map.fitBounds(bounds, { padding: [50, 50] });
+        }
     }
 }

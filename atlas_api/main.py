@@ -9,7 +9,7 @@ import logging
 import sys
 
 from . import config
-from .routes import locations, goods_types
+from .routes import locations, goods_types, route
 
 # Configure logging
 logging.basicConfig(
@@ -39,6 +39,7 @@ app.add_middleware(
 # Include routers
 app.include_router(locations.router)
 app.include_router(goods_types.router)
+app.include_router(route.router)
 
 
 @app.get("/")

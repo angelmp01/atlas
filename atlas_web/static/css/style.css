@@ -398,6 +398,108 @@ header p {
     cursor: not-allowed;
 }
 
+/* Status notification bar (floating top-right) */
+.status-notification {
+    display: none;
+    padding: 14px 24px;
+    border-radius: 8px;
+    font-size: 0.95em;
+    font-weight: 500;
+    text-align: left;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    animation: slideInRight 0.4s ease-out;
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    align-items: center;
+    max-width: 500px;
+    min-width: 280px;
+    width: auto;
+}
+
+.status-notification::before {
+    content: '';
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    margin-right: 12px;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+.status-notification.info {
+    display: flex;
+    background: #d6eaf8;
+    color: #1a5490;
+    border: 2px solid #3498db;
+}
+
+.status-notification.info::before {
+    content: 'ℹ️';
+    font-size: 18px;
+}
+
+.status-notification.success {
+    display: flex;
+    background: #d5f4e6;
+    color: #0d5c2e;
+    border: 2px solid #27ae60;
+}
+
+.status-notification.success::before {
+    content: '✓';
+    background: #27ae60;
+    color: white;
+    border-radius: 50%;
+    font-weight: bold;
+    font-size: 14px;
+    line-height: 20px;
+    text-align: center;
+}
+
+.status-notification.error {
+    display: flex;
+    background: #fadbd8;
+    color: #7a1e16;
+    border: 2px solid #e74c3c;
+}
+
+.status-notification.error::before {
+    content: '✕';
+    background: #e74c3c;
+    color: white;
+    border-radius: 50%;
+    font-weight: bold;
+    font-size: 14px;
+    line-height: 20px;
+    text-align: center;
+}
+
+.status-notification.warning {
+    display: flex;
+    background: #fcf3cf;
+    color: #7d6608;
+    border: 2px solid #f39c12;
+}
+
+.status-notification.warning::before {
+    content: '⚠';
+    font-size: 18px;
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(100px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Legacy status message (remove if not used elsewhere) */
 .status-message {
     margin-top: 20px;
     padding: 15px;
@@ -509,4 +611,22 @@ header p {
 
 @keyframes spin {
     to { transform: rotate(360deg); }
+}
+
+/* Route tooltip - remove default Leaflet styles */
+.route-tooltip {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.route-tooltip::before {
+    display: none !important;
+}
+
+.leaflet-tooltip-left.route-tooltip::before,
+.leaflet-tooltip-right.route-tooltip::before {
+    display: none !important;
 }
