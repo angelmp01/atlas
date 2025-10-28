@@ -14,8 +14,10 @@
         <div id="status" class="status-notification"></div>
         
         <header>
-            <h1>🚛 ATLAS Logistics Platform</h1>
-            <p>Optimización de rutas de transporte por carretera</p>
+            <div class="header-content">
+                <img src="{{ url_for('static', path='/img/atlas-banner-flat-transparent.png') }}" alt="ATLAS" class="header-logo">
+                <p class="header-subtitle">Advanced Transportation Logistics Analysis System</p>
+            </div>
         </header>
 
         <div class="content">
@@ -94,14 +96,29 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="buffer">Buffer (km): <span id="buffer-value">50</span></label>
-                        <input type="range" id="buffer" name="buffer" value="50" min="10" max="100" step="5" required>
-                        <div class="buffer-scale">
-                            <span>10</span>
-                            <span>50</span>
-                            <span>100</span>
+                        <label for="buffer">Buffer (km): <span id="buffer-value">30</span></label>
+                        <input type="range" id="buffer" name="buffer" value="30" min="10" max="100" step="5" required>
+                        <div class="slider-scale">
+                            <span style="left: 0%;">10</span>
+                            <span style="left: 24%;">30</span>
+                            <span style="left: 44.5%;">50</span>
+                            <span style="left: 71%;">75</span>
+                            <span style="left: 100%;">100</span>
                         </div>
                         <small>Radio de búsqueda en kilómetros</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="load">Carga disponible (kg): <span id="load-value">2000</span></label>
+                        <input type="range" id="load" name="load" value="2500" min="500" max="11000" step="50" required>
+                        <div class="slider-scale">
+                            <span style="left: 0%;">500</span>
+                            <span style="left: 21%;">2.500</span>
+                            <span style="left: 43%;">5.000</span>
+                            <span style="left: 71.5%;">8.000</span>
+                            <span style="left: 100%;">11.000</span>
+                        </div>
+                        <small>Capacidad de carga del camión</small>
                     </div>
 
                     <div class="form-group">

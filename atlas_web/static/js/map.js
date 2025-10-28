@@ -35,6 +35,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Initialize buffer slider
     initBufferSlider();
     
+    // Initialize load slider
+    initLoadSlider();
+    
     // Initialize autocomplete fields
     initAutocomplete('origin');
     initAutocomplete('destination');
@@ -451,6 +454,24 @@ function initBufferSlider() {
     });
     
     // Initial background update
+    updateSliderBackground(slider);
+}
+
+/**
+ * Initialize load range slider
+ */
+function initLoadSlider() {
+    const slider = document.getElementById('load');
+    const valueDisplay = document.getElementById('load-value');
+    
+    // Update display when slider changes
+    slider.addEventListener('input', (e) => {
+        valueDisplay.textContent = parseInt(e.target.value).toLocaleString('es-ES');
+        updateSliderBackground(slider);
+    });
+    
+    // Initial background update and display
+    valueDisplay.textContent = parseInt(slider.value).toLocaleString('es-ES');
     updateSliderBackground(slider);
 }
 
