@@ -27,6 +27,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Log CORS configuration
+logger.info(f"CORS Origins configured: {config.CORS_ORIGINS}")
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,

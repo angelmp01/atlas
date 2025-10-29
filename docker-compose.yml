@@ -1,0 +1,81 @@
+services:
+  # PostGIS + pgRouting database
+  postgis:
+    image: pgrouting/pgrouting:17-3.5-3.8     # PG 17 + PostGIS 3.5 + pgRouting 3.8
+    container_name: postgis-pg16              # lo dejamos igual para no romper clientes
+    env_file:
+      - env/postgis.env
+    ports:
+      - "25432:5432"
+    volumes:
+      # ⚠️ Usa una ruta NUEVA para este clúster (no reutilices ../data/postgis de PG16)
+      - ../data/postgis_pgroute:/var/lib/postgresql/data
+      # Si quieres mantener scripts de init para BDs nuevas, puedes montar igualmente:
+      # - ./init:/docker-entrypoint-initdb.d:ro
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - geonet
+
+  # ATLAS API (FastAPI backend)
+  atlas_api:
+    image: atlas-api:latest  # Usa la imagen pre-construida
+    container_name: atlas-api
+    environment:
+      - DB_HOST=postgis
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-gisdb}
+      - DB_USER=${POSTGRES_USER:-appuser}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-pgai1234}
+      # CORS: Orígenes permitidos (separados por coma)
+      - CORS_ORIGINS=https://atlasproject.duckdns.org,https://api.atlasproject.duckdns.org
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - geonet
+
+  # ATLAS Web (Frontend)
+  atlas_web:
+    image: atlas-web:latest  # Usa la imagen pre-construida
+    container_name: atlas-web
+    environment:
+      - API_BASE_URL=https://api.atlasproject.duckdns.org
+    ports:
+      - "8001:8001"
+    depends_on:
+      atlas_api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - geonet
+
+networks:
+  geonet:
+    name: geonet
+    driver: bridge
