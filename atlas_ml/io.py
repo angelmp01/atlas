@@ -466,8 +466,12 @@ class DatasetBuilder:
             'peso': ['mean', 'median', 'std'],
             'volumen': ['mean', 'median', 'std'],
             'od_length_km': 'mean',
-            'truck_type': 'first',  # Take first value (faster than mode)
-            'tipo_mercancia': 'first'
+            'tipo_mercancia': 'first',  # normal/refrigerada (truck_type removed - redundant)
+            # Preserve geographic coordinates (same for all records in group)
+            'origin_lat': 'first',
+            'origin_lon': 'first',
+            'destination_lat': 'first',
+            'destination_lon': 'first'
         }).reset_index()
         
         logger.info(f"Step 2/3: Flattening {len(od_daily):,} aggregated rows...")
@@ -492,8 +496,12 @@ class DatasetBuilder:
             'volumen_median': 'volumen_median_daily',
             'volumen_std': 'volumen_std_daily',
             'od_length_km_mean': 'od_length_km',
-            'truck_type_first': 'truck_type',
-            'tipo_mercancia_first': 'tipo_mercancia'
+            'tipo_mercancia_first': 'tipo_mercancia',  # normal/refrigerada
+            # Geographic coordinates (preserve for feature engineering)
+            'origin_lat_first': 'origin_lat',
+            'origin_lon_first': 'origin_lon',
+            'destination_lat_first': 'destination_lat',
+            'destination_lon_first': 'destination_lon'
         }
         
         od_daily = od_daily.rename(columns=rename_dict)

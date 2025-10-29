@@ -68,20 +68,37 @@ class FeatureBuilder:
                         row['destination_lat'], row['destination_lon']
                     ), axis=1
                 )
+            
+            # Add absolute geographic coordinates (Catalunya-specific patterns)
+            # These capture spatial effects: coastal vs inland, urban vs rural, port zones, etc.
+            # NOTE: Coordinates already exist in dataframe, we just add derived features
+            
+            # Geographic zone indicators (Catalunya-specific)
+            # Barcelona metropolitan area (high traffic zone)
+            barcelona_lat, barcelona_lon = 41.3851, 2.1734
+            df['origin_dist_to_bcn'] = df.apply(
+                lambda row: haversine_distance(row['origin_lat'], row['origin_lon'], barcelona_lat, barcelona_lon),
+                axis=1
+            )
+            df['dest_dist_to_bcn'] = df.apply(
+                lambda row: haversine_distance(row['destination_lat'], row['destination_lon'], barcelona_lat, barcelona_lon),
+                axis=1
+            )
+            
+            # Coastal vs inland indicator (Mediterranean coast effect)
+            # Catalunya coast is roughly at lon > 0.5 and lat between 40.5-42.5
+            df['origin_is_coastal'] = ((df['origin_lon'] > 0.5) & 
+                                       (df['origin_lat'] > 40.5) & 
+                                       (df['origin_lat'] < 42.5)).astype(int)
+            df['dest_is_coastal'] = ((df['destination_lon'] > 0.5) & 
+                                     (df['destination_lat'] > 40.5) & 
+                                     (df['destination_lat'] < 42.5)).astype(int)
         
-        # Truck type standardization
-        if 'tipo_mercancia' in df.columns and 'truck_type' not in df.columns:
-            df['truck_type'] = df['tipo_mercancia'].map({
-                'refrigerada': 'refrigerado',
-                'normal': 'normal'
-            }).fillna('normal')
-        
-        # Log-transform skewed numerical features
-        numerical_features = ['precio', 'peso', 'volumen', 'od_length_km']
-        for feature in numerical_features:
-            if feature in df.columns:
-                log_feature = f"log_{feature}"
-                df[log_feature] = np.log1p(df[feature].clip(lower=0))
+        # NOTE: We DON'T create log-transformed features anymore
+        # Reasons:
+        # 1. They cause confusion (log_precio would need precio as input, which we don't have at inference)
+        # 2. XGBoost can learn non-linear transformations automatically via tree splits
+        # 3. Simplifies feature engineering and reduces feature count
         
         return df
     
@@ -97,7 +114,8 @@ class FeatureBuilder:
             DataFrame with encoded categorical features
         """
         # Avoid expensive copy() for large datasets - modify in place
-        categorical_cols = ['truck_type', 'tipo_mercancia']
+        # Only encode tipo_mercancia (normal/refrigerada)
+        categorical_cols = ['tipo_mercancia']
         
         for col in categorical_cols:
             if col in df.columns:
@@ -160,7 +178,11 @@ class ProbabilityFeatureBuilder(FeatureBuilder):
 
 
 class RegressionFeatureBuilder(FeatureBuilder):
-    """Feature builder for price and weight regression models."""
+    """Feature builder for price and weight regression models.
+    
+    Uses the same base features as ProbabilityFeatureBuilder for consistency.
+    No distance bins needed - XGBoost learns optimal splits automatically.
+    """
     
     def build_features(
         self,
@@ -171,8 +193,7 @@ class RegressionFeatureBuilder(FeatureBuilder):
         """
         Build features for regression models (price/weight).
         
-        Simplified: only base features + categorical encoding.
-        Historical features removed for now.
+        Uses same feature engineering as probability model for consistency.
         
         Args:
             df: Input dataframe
@@ -184,27 +205,11 @@ class RegressionFeatureBuilder(FeatureBuilder):
         """
         logger.info(f"Building features for {target_col} regression")
         
-        # Base features
+        # Use same base features as probability model
         df = self.create_base_features(df)
         
-        # Categorical encoding
+        # Use same categorical encoding as probability model
         df = self.create_categorical_features(df, fit=fit)
-        
-        # Distance-based features
-        if 'od_length_km' in df.columns:
-            # Distance bins
-            df['distance_bin'] = pd.cut(
-                df['od_length_km'],
-                bins=[0, 50, 100, 200, 500, np.inf],
-                labels=['very_short', 'short', 'medium', 'long', 'very_long']
-            ).astype(str)
-            
-            # Distance per weight/volume ratios
-            if 'peso' in df.columns and target_col != 'peso':
-                df['km_per_kg'] = df['od_length_km'] / (df['peso'] + 1e-6)
-            
-            if 'volumen' in df.columns:
-                df['km_per_m3'] = df['od_length_km'] / (df['volumen'] + 1e-6)
         
         return df
 
@@ -278,7 +283,7 @@ def build_probability_dataset(config: Config, quick_test: bool = False) -> pd.Da
         df[col] = pd.to_numeric(df[col], downcast='integer')
     
     logger.info("=" * 70)
-    logger.info(f"[OK] DATASET READY: {len(df):,} samples × {len(df.columns)} features")
+    logger.info(f"[OK] DATASET READY: {len(df):,} samples x {len(df.columns)} features")
     logger.info("=" * 70)
     return df
 
@@ -379,10 +384,16 @@ def get_feature_names(task_type: str, include_tau: bool = False) -> List[str]:
         List of expected feature names
     """
     base_features = [
+        # Temporal features (from date input)
         'day_of_week', 'week_of_year', 'holiday_flag', 'month', 'quarter',
-        'od_length_km', 'log_od_length_km',
-        'truck_type_encoded', 'tipo_mercancia_encoded',
-        'origin_id_target_encoded', 'destination_id_target_encoded'
+        # Geographic features (from origin/destination coordinates)
+        'od_length_km',  # Haversine distance
+        'origin_lat', 'origin_lon', 'destination_lat', 'destination_lon',  # Absolute coordinates
+        'origin_dist_to_bcn', 'dest_dist_to_bcn',  # Distance to Barcelona
+        'origin_is_coastal', 'dest_is_coastal',  # Coastal vs inland indicator
+        # Categorical features (from user input)
+        'tipo_mercancia_encoded',  # normal/refrigerada (truck_type is redundant, removed)
+        # Note: target encoding removed (not computed anymore)
     ]
     
     # Historical features
@@ -410,10 +421,6 @@ def get_feature_names(task_type: str, include_tau: bool = False) -> List[str]:
         ]
         features.extend(tau_features)
     
-    if task_type in ['price', 'weight']:
-        regression_features = [
-            'distance_bin', 'km_per_kg', 'km_per_m3'
-        ]
-        features.extend(regression_features)
+    # No task-specific features for price/weight - use same base features as probability
     
     return features

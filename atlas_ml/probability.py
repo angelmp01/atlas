@@ -155,8 +155,22 @@ class ProbabilityEstimator:
         df_features = self.feature_builder.build_features(df, include_tau=False, fit=True)
         
         # Train daily count model
-        excluded_cols = ['date', 'n_trips_daily', 'origin_id', 'destination_id', 'truck_type', 'tipo_mercancia']
+        # Exclude: target, IDs, raw categoricals, and historical aggregates (data leakage)
+        excluded_cols = [
+            'date', 'n_trips_daily', 'origin_id', 'destination_id', 
+            'tipo_mercancia',  # Use encoded version instead
+            # Historical aggregates - NOT AVAILABLE at inference time (data leakage)
+            'n_trips_total', 'n_trips',
+            'precio_mean_daily', 'precio_median_daily', 'precio_std_daily',
+            'peso_mean_daily', 'peso_median_daily', 'peso_std_daily',
+            'volumen_mean_daily', 'volumen_median_daily', 'volumen_std_daily',
+            # Log-transformed versions of features we shouldn't use
+            'log_precio', 'log_peso', 'log_volumen'
+        ]
         feature_columns = [col for col in df_features.columns if col not in excluded_cols]
+        
+        logger.info(f"Using {len(feature_columns)} features (excluded {len(excluded_cols)} columns)")
+        logger.info(f"Features: {sorted(feature_columns)[:10]}... (showing first 10)")
         
         X = df_features[feature_columns].fillna(0)
         y_raw = df_features['n_trips_daily'].clip(lower=0)  # Ensure non-negative

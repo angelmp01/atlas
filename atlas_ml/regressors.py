@@ -118,8 +118,21 @@ class RegressionEstimator:
         )
         
         # Prepare training data
-        # Exclude non-numeric columns (use their encoded versions instead)
-        exclude_cols = ['date', self.target_column, 'origin_id', 'destination_id']
+        # Exclude: target, IDs, raw categoricals, and historical/leakage features
+        exclude_cols = [
+            'date', self.target_column, 'origin_id', 'destination_id',
+            'tipo_mercancia',  # Use encoded version instead
+            # Data leakage - features we won't have at inference time
+            'n_trips_total', 'n_trips', 'n_trips_logistic',  # Don't use probability predictions
+            'peso', 'precio', 'volumen',  # Can't use target variables as features
+            'trips_total_length_km',  # Redundant with od_length_km
+            # Historical aggregates - same-variable leakage
+            'precio_mean_daily', 'precio_median_daily', 'precio_std_daily',
+            'peso_mean_daily', 'peso_median_daily', 'peso_std_daily',
+            'volumen_mean_daily', 'volumen_median_daily', 'volumen_std_daily',
+            # Log-transformed versions
+            'log_precio', 'log_peso', 'log_volumen'
+        ]
         
         # Exclude all categorical/string columns (keep only their encoded versions)
         for col in df_features.columns:
@@ -131,6 +144,9 @@ class RegressionEstimator:
         
         feature_columns = [col for col in df_features.columns 
                           if col not in exclude_cols]
+        
+        logger.info(f"Using {len(feature_columns)} features for {self.target_type} model")
+        logger.info(f"Features: {sorted(feature_columns)[:10]}... (showing first 10)")
         
         X = df_features[feature_columns].fillna(0)
         y = df_features[self.target_column]
