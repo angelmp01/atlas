@@ -42,4 +42,10 @@ else:
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
-MODELS_DIR = PROJECT_ROOT / "models"
+
+# ML Models directory (configurable via environment variable)
+MODELS_DIR_ENV = os.getenv("MODELS_DIR")
+if MODELS_DIR_ENV:
+    MODELS_DIR = Path(MODELS_DIR_ENV)
+else:
+    MODELS_DIR = PROJECT_ROOT / "models"

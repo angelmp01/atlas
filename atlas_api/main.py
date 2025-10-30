@@ -9,7 +9,7 @@ import logging
 import sys
 
 from . import config
-from .routes import locations, goods_types, route
+from .routes import locations, goods_types, route, inference
 
 # Configure logging
 logging.basicConfig(
@@ -43,6 +43,7 @@ app.add_middleware(
 app.include_router(locations.router)
 app.include_router(goods_types.router)
 app.include_router(route.router)
+app.include_router(inference.router)
 
 
 @app.get("/")

@@ -40,3 +40,5 @@ python-multipart>=0.0.6  # Form data parsing
 pytest>=7.3.0
 black>=23.0.0  # Code formatting
 flake8>=6.0.0  # Linting
+
+geopy
