@@ -111,8 +111,8 @@ class InferenceResponse(BaseModel):
     # Alternative routes (sorted by best score)
     alternative_routes: List[AlternativeRoute]
     
-    # All evaluated candidates (for debugging)
-    candidates_debug: List[CandidateDebugInfo]
+    # All evaluated candidates (for visualization and debugging)
+    candidates_information: List[CandidateDebugInfo]
     
     # Metadata
     metadata: Dict[str, Any]
@@ -973,7 +973,7 @@ async def inference_endpoint(request: InferenceRequest):
             return InferenceResponse(
                 base_trip=base_route,
                 alternative_routes=[],
-                candidates_debug=[],
+                candidates_information=[],
                 metadata={
                     "reason": "No candidate locations found within buffer corridor",
                     "models_info": {
@@ -1036,7 +1036,7 @@ async def inference_endpoint(request: InferenceRequest):
         response = InferenceResponse(
             base_trip=base_route,
             alternative_routes=routes,
-            candidates_debug=candidates_debug_objs,
+            candidates_information=candidates_debug_objs,
             metadata={
                 "total_candidates_evaluated": len(candidates_scored),
                 "total_feasible_candidates": len([c for c in candidates_scored if c['is_feasible']]),

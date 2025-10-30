@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ATLAS Map and Form Interaction
  * 
  * Handles:
@@ -7,14 +7,13 @@
  * - Map initialization and interaction
  */
 
-// API base URL (set by server)
-const API_BASE_URL = window.API_BASE_URL || 'http://127.0.0.1:8000';
-
-// Global map instance
+// Global map instance (API_BASE_URL, MAP_CENTER, MAP_ZOOM are set by server in HTML)
 let map = null;
 let markers = {};
 let locations = []; // Store all locations for autocomplete
 let infoControl = null; // Info panel for hover
+let layerGroups = {}; // Layer groups for visualization
+let currentCandidates = []; // Store current inference candidates for metric visualization
 
 /**
  * Initialize the application
@@ -47,6 +46,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Attach form handler
     document.getElementById('route-form').addEventListener('submit', handleFormSubmit);
+    
+    // Initialize form validation
+    initFormValidation();
+    
+    // Initialize results panel toggle buttons
+    const toggleBtn = document.getElementById('toggle-results-btn');
+    const closeBtn = document.getElementById('close-results-btn');
+    
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', toggleResultsPanel);
+    }
+    
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeResultsPanel);
+    }
 });
 
 /**
@@ -95,7 +109,218 @@ function initMap() {
     
     infoControl.addTo(map);
     
+    // Initialize layer groups for visualization
+    layerGroups = {
+        baseRoute: L.layerGroup().addTo(map),
+        allCandidates: L.layerGroup().addTo(map),
+        feasibleCandidates: L.layerGroup().addTo(map),
+        probabilityHeatmap: L.layerGroup().addTo(map),
+        priceHeatmap: L.layerGroup().addTo(map),
+        weightHeatmap: L.layerGroup().addTo(map),
+        scores: L.layerGroup().addTo(map),
+        etaHeatmap: L.layerGroup().addTo(map),
+        deltaDistance: L.layerGroup().addTo(map),
+        alternativeRoutes: L.layerGroup().addTo(map),
+        selectedRoute: L.layerGroup().addTo(map)
+    };
+    
+    // Add layer control for new visualization features
+    addLayerControl();
+    
     console.log('Map initialized');
+}
+
+/**
+ * Setup event listeners for layer control icons
+ */
+function setupLayerControlEvents() {
+    const baseLocationsBtn = document.getElementById('layer-base-locations');
+    const candidatesBtn = document.getElementById('layer-candidates');
+    const metricBtns = document.querySelectorAll('.metric-btn');
+    
+    // Toggle base locations (blue markers loaded at startup)
+    if (baseLocationsBtn) {
+        baseLocationsBtn.addEventListener('click', () => {
+            const isActive = baseLocationsBtn.dataset.active === 'true';
+            baseLocationsBtn.dataset.active = !isActive;
+            
+            // Get exception IDs (origin and destination if set)
+            const exceptions = window.markerExceptions || [];
+            
+            // Toggle base location markers
+            Object.entries(markers).forEach(([id, marker]) => {
+                // Skip exception markers (always keep them visible)
+                if (exceptions.includes(id)) {
+                    return;
+                }
+                
+                if (!isActive) {
+                    marker.addTo(map);
+                } else {
+                    marker.remove();
+                }
+            });
+        });
+    }
+    
+    // Candidates and Metric buttons (mutually exclusive group)
+    const visualizationBtns = [candidatesBtn, ...metricBtns].filter(btn => btn);
+    
+    visualizationBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const wasActive = btn.dataset.active === 'true';
+            
+            // Deactivate all visualization buttons
+            visualizationBtns.forEach(b => b.dataset.active = 'false');
+            
+            // Clear and remove all visualization layers to prevent ghost markers
+            layerGroups.allCandidates.clearLayers();
+            layerGroups.probabilityHeatmap.clearLayers();
+            layerGroups.priceHeatmap.clearLayers();
+            layerGroups.weightHeatmap.clearLayers();
+            layerGroups.scores.clearLayers();
+            
+            map.removeLayer(layerGroups.allCandidates);
+            map.removeLayer(layerGroups.probabilityHeatmap);
+            map.removeLayer(layerGroups.priceHeatmap);
+            map.removeLayer(layerGroups.weightHeatmap);
+            map.removeLayer(layerGroups.scores);
+            
+            // If wasn't active, activate this one and show its layer
+            if (!wasActive) {
+                btn.dataset.active = 'true';
+                
+                // Check if it's the candidates button or a metric button
+                if (btn.id === 'layer-candidates') {
+                    // Show all candidates without metric visualization
+                    if (currentCandidates.length > 0) {
+                        currentCandidates.forEach(candidate => {
+                            const marker = L.circleMarker([candidate.latitude, candidate.longitude], {
+                                radius: 6,
+                                fillColor: '#F59E0B',
+                                color: '#fff',
+                                weight: 1,
+                                opacity: 1,
+                                fillOpacity: 0.7
+                            });
+                            
+                            marker.bindTooltip(`
+                                <div class="tooltip-content">
+                                    <strong>${candidate.location_name}</strong><br>
+                                    ETA: ${candidate.eta_km.toFixed(1)} km<br>
+                                    Δd: ${candidate.delta_d_km.toFixed(1)} km
+                                </div>
+                            `);
+                            
+                            marker.on('click', () => showCandidateDetails(candidate));
+                            marker.addTo(layerGroups.allCandidates);
+                        });
+                        map.addLayer(layerGroups.allCandidates);
+                    }
+                } else {
+                    // It's a metric button, show scaled visualization
+                    updateMetricVisualization();
+                }
+            }
+        });
+    });
+}
+
+/**
+ * Update metric visualization based on active metric button
+ */
+function updateMetricVisualization() {
+    const activeMetricBtn = document.querySelector('.metric-btn[data-active="true"]');
+    
+    if (!activeMetricBtn || !currentCandidates || currentCandidates.length === 0) {
+        return;
+    }
+    
+    const metricType = activeMetricBtn.id.replace('layer-', '');
+    const metricMap = {
+        'probability': { key: 'probability', layer: 'probabilityHeatmap', color: '#8B5CF6' },
+        'price': { key: 'price', layer: 'priceHeatmap', color: '#F59E0B' },
+        'weight': { key: 'weight', layer: 'weightHeatmap', color: '#10B981' },
+        'score': { key: 'score', layer: 'scores', color: '#3B82F6' }
+    };
+    
+    const config = metricMap[metricType];
+    if (!config) return;
+    
+    // Clear ALL candidate visualization layers first to prevent ghost markers
+    layerGroups.allCandidates.clearLayers();
+    layerGroups.feasibleCandidates.clearLayers();
+    layerGroups.probabilityHeatmap.clearLayers();
+    layerGroups.priceHeatmap.clearLayers();
+    layerGroups.weightHeatmap.clearLayers();
+    layerGroups.scores.clearLayers();
+    
+    // Draw scaled metric circles
+    drawScaledMetricCandidates(currentCandidates, metricType, config.layer, config.color);
+    map.addLayer(layerGroups[config.layer]);
+}
+
+/**
+ * Add layer control for toggling visualization layers
+ */
+function addLayerControl() {
+    const LayerControl = L.Control.extend({
+        options: {
+            position: 'topright'
+        },
+        
+        onAdd: function(map) {
+            const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control layer-control-icons');
+            
+            container.innerHTML = `
+                <button class="layer-icon-btn" id="layer-base-locations" data-active="true" title="Mostrar/ocultar localizaciones base">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                    </svg>
+                </button>
+                <button class="layer-icon-btn" id="layer-candidates" data-active="false" title="Mostrar/ocultar candidatos evaluados" style="display: none;">
+                    <img src="https://files.svgcdn.io/hugeicons/view.svg" alt="View" style="width: 24px; height: 24px;">
+                </button>
+                <button class="layer-icon-btn metric-btn" id="layer-probability" data-active="false" title="Predicción de probabilidad" style="display: none;">
+                    <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Package" style="width: 24px; height: 24px;">
+                </button>
+                <button class="layer-icon-btn metric-btn" id="layer-price" data-active="false" title="Predicción de precio" style="display: none;">
+                    <img src="https://files.svgcdn.io/hugeicons/money-bag-02.svg" alt="Money" style="width: 24px; height: 24px;">
+                </button>
+                <button class="layer-icon-btn metric-btn" id="layer-weight" data-active="false" title="Predicción de peso" style="display: none;">
+                    <img src="https://files.svgcdn.io/hugeicons/weight-scale-01.svg" alt="Weight" style="width: 24px; height: 24px;">
+                </button>
+                <button class="layer-icon-btn metric-btn" id="layer-score" data-active="false" title="Score de optimización" style="display: none;">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                    </svg>
+                </button>
+                <button class="layer-icon-btn" id="toggle-results-btn" title="Mostrar/Ocultar resultados" style="display: none;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" transform="scale(-1, 1)">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        <line x1="9" y1="3" x2="9" y2="21"/>
+                        <line x1="14" y1="8" x2="19" y2="8"/>
+                        <line x1="14" y1="12" x2="19" y2="12"/>
+                        <line x1="14" y1="16" x2="19" y2="16"/>
+                    </svg>
+                </button>
+            `;
+            
+            // Prevent map interactions when clicking control
+            L.DomEvent.disableClickPropagation(container);
+            L.DomEvent.disableScrollPropagation(container);
+            
+            return container;
+        }
+    });
+    
+    const layerControl = new LayerControl();
+    layerControl.addTo(map);
+    
+    // Add event listeners
+    setTimeout(() => {
+        setupLayerControlEvents();
+    }, 100);
 }
 
 /**
@@ -125,6 +350,9 @@ function initClearButtons() {
                 opacity: 1
             });
         }
+        
+        // Validate form after clearing
+        validateForm();
     });
     
     clearDestination.addEventListener('click', () => {
@@ -145,14 +373,62 @@ function initClearButtons() {
                 opacity: 1
             });
         }
+        
+        // Validate form after clearing
+        validateForm();
     });
+}
+
+/**
+ * Initialize form validation
+ */
+function initFormValidation() {
+    // Only need to validate origin and destination
+    // Other fields have valid defaults
+    const originInput = document.getElementById('origin');
+    const destinationInput = document.getElementById('destination');
+    
+    // Add event listeners only to origin/destination
+    originInput.addEventListener('input', validateForm);
+    destinationInput.addEventListener('input', validateForm);
+    
+    // Initial validation
+    validateForm();
+}
+
+/**
+ * Validate all form fields and enable/disable submit button
+ */
+function validateForm() {
+    const originInput = document.getElementById('origin');
+    const destinationInput = document.getElementById('destination');
+    const submitBtn = document.getElementById('optimize-btn');
+    
+    // Only validate that origin and destination are selected
+    // All other fields have valid default values
+    const isValid = 
+        originInput.dataset.locationId && 
+        destinationInput.dataset.locationId;
+    
+    console.log('Validating form:', {
+        origin: originInput.dataset.locationId,
+        destination: destinationInput.dataset.locationId,
+        isValid
+    });
+    
+    submitBtn.disabled = !isValid;
 }
 
 /**
  * Show all markers on the map
  */
 function showAllMarkers() {
+    // Clear marker exceptions
+    window.markerExceptions = [];
+    
+    // Add all markers to map and reset their style
     Object.values(markers).forEach(circle => {
+        circle.addTo(map);
         circle.setStyle({ 
             radius: 4,
             fillColor: '#3498db',
@@ -162,6 +438,12 @@ function showAllMarkers() {
             fillOpacity: 0.6 
         });
     });
+    
+    // Update the base locations button state to "active"
+    const baseLocationsBtn = document.getElementById('layer-base-locations');
+    if (baseLocationsBtn) {
+        baseLocationsBtn.dataset.active = 'true';
+    }
     
     // Remove route line if exists
     if (window.routeLine) {
@@ -174,13 +456,26 @@ function showAllMarkers() {
  * Hide all markers except specified ones
  */
 function hideMarkersExcept(exceptIds = []) {
+    // Store the exception IDs for later use
+    window.markerExceptions = exceptIds;
+    
+    // Remove all markers from map, then add back only the exceptions
     Object.entries(markers).forEach(([id, circle]) => {
-        if (exceptIds.includes(id)) {
-            circle.setStyle({ opacity: 1, fillOpacity: 0.9 });
-        } else {
-            circle.setStyle({ opacity: 0, fillOpacity: 0 });
+        circle.remove();
+    });
+    
+    // Add back only the exception markers
+    exceptIds.forEach(id => {
+        if (markers[id]) {
+            markers[id].addTo(map);
         }
     });
+    
+    // Update the base locations button state to "inactive" (since we're hiding them)
+    const baseLocationsBtn = document.getElementById('layer-base-locations');
+    if (baseLocationsBtn) {
+        baseLocationsBtn.dataset.active = 'false';
+    }
 }
 
 /**
@@ -253,7 +548,10 @@ function selectLocationOnMap(location) {
             });
         }
         
-        showStatus('✅ Origen seleccionado. Ahora selecciona el destino.', 'success', 3000);
+        showStatus('Origen seleccionado. Ahora selecciona el destino.', 'success', 3000);
+        
+        // Validate form to enable/disable button
+        validateForm();
         
         // Check if destination is already set
         updateRouteDisplay();
@@ -262,21 +560,24 @@ function selectLocationOnMap(location) {
     else if (!destinationInput.dataset.locationId) {
         // Don't allow same location
         if (location.id === originInput.dataset.locationId) {
-            showStatus('⚠️ El destino debe ser diferente al origen', 'warning', 3000);
+            showStatus('El destino debe ser diferente al origen', 'warning', 3000);
             return;
         }
         
         destinationInput.value = location.name;
         destinationInput.dataset.locationId = location.id;
         
-        showStatus('✅ Destino seleccionado. Puedes calcular la ruta.', 'success', 3000);
+        showStatus('Destino seleccionado. Puedes calcular la ruta.', 'success', 3000);
+        
+        // Validate form to enable/disable button
+        validateForm();
         
         // Update route display (hide markers, draw line, zoom)
         updateRouteDisplay();
     }
     // Both are set, do nothing or show message
     else {
-        showStatus('ℹ️ Origen y destino ya están seleccionados. Usa el icono de basura para cambiar.', 'info', 3000);
+        showStatus('Origen y destino ya están seleccionados. Usa el icono de basura para cambiar.', 'info', 3000);
     }
 }
 
@@ -414,7 +715,8 @@ function selectSuggestion(input, suggestionsDiv, locationId, locationName) {
             // Revert the change
             input.value = '';
             delete input.dataset.locationId;
-            showStatus('⚠️ El destino debe ser diferente al origen', 'warning', 3000);
+            showStatus('El destino debe ser diferente al origen', 'warning', 3000);
+            validateForm();
             return;
         }
         
@@ -438,6 +740,9 @@ function selectSuggestion(input, suggestionsDiv, locationId, locationName) {
         // Nothing selected, show all
         showAllMarkers();
     }
+    
+    // Validate form after selection
+    validateForm();
 }
 
 /**
@@ -553,11 +858,11 @@ async function loadLocations() {
             }
         });
         
-        showStatus(`✅ ${locations.length} localizaciones cargadas`, 'success', 2000);
+        showStatus(`${locations.length} localizaciones cargadas`, 'success', 2000);
         
     } catch (error) {
         console.error('Error loading locations:', error);
-        showStatus(`❌ ERROR: ${error.message}`, 'error', 0);
+        showStatus(`ERROR: ${error.message}`, 'error', 0);
     }
 }
 
@@ -598,26 +903,44 @@ async function handleFormSubmit(event) {
     data.destination_name = destinationInput.value;
     
     // Show loading
-    showStatus('Calculando ruta...', 'info');
+    showStatus('Optimizando ruta...', 'info');
     const button = event.target.querySelector('button[type="submit"]');
     button.disabled = true;
-    button.innerHTML = '<span class="loading"></span> Calculando...';
+    button.innerHTML = '<span class="loading"></span> Optimizando...';
     
     try {
-        // For now, just highlight the selected locations
-        highlightRoute(data.origin, data.destination);
+        // Prepare data for inference API
+        const requestData = {
+            origin_id: data.origin,
+            destination_id: data.destination,
+            truck_type: data.truck_type,
+            date: data.date,
+            max_detour_km: parseFloat(data.buffer),
+            max_candidates: 10,
+            truck_capacity_kg: 20000,
+            buffer_value_km: parseFloat(data.buffer),
+            available_capacity_kg: parseFloat(data.load)
+        };
         
-        showStatus(`Ruta calculada: ${data.origin_name} → ${data.destination_name}`, 'success');
+        console.log('Calling inference API with:', requestData);
         
-        // Show results
-        displayResults(data);
+        // Call inference API
+        const response = await runInference(requestData);
+        
+        console.log('Inference response:', response);
+        
+        showStatus(`✅ Ruta optimizada: ${data.origin_name} → ${data.destination_name}`, 'success', 5000);
+        
+        // Display results on map
+        displayInferenceResults(response, data);
         
     } catch (error) {
-        console.error('Error calculating route:', error);
+        console.error('Error optimizing route:', error);
         showStatus(`Error: ${error.message}`, 'error');
     } finally {
-        button.disabled = false;
-        button.innerHTML = '🔍 Calcular Ruta';
+        // Re-validate form to re-enable button if all fields are still valid
+        validateForm();
+        button.innerHTML = '<img src="/static/img/artificial-intelligence_3489001.png" alt="AI" class="ai-icon"> Optimizar Ruta';
     }
 }
 
@@ -666,25 +989,116 @@ function highlightRoute(originId, destinationId) {
 }
 
 /**
- * Display calculation results
+ * Display inference results on map
  */
-function displayResults(data) {
+function displayInferenceResults(response, formData) {
     const resultsDiv = document.getElementById('results');
     
+    // Don't auto-show the panel, just populate the data
     // Format truck type
-    const truckType = data.truck_type === 'refrigerated' ? '❄ Refrigerado' : '🚚 Normal';
+    const truckType = formData.truck_type === 'refrigerated' ? '❄ Refrigerado' : '🚚 Normal';
     
+    // Get routes and candidates from response
+    const routes = response.alternative_routes || [];
+    const candidates = response.candidates_information || [];
+    
+    // Store candidates globally for metric visualization
+    currentCandidates = candidates;
+    
+    // Display summary (without h3 since it's in the header now)
     resultsDiv.innerHTML = `
-        <h3>Parámetros de Búsqueda</h3>
+        <div class="result-summary">
+            <p><strong>Rutas optimizadas:</strong> ${routes.length}</p>
+            <p><strong>Candidatos analizados:</strong> ${candidates.length}</p>
+            <p><strong>Viaje base:</strong> ${response.base_trip?.distance?.toFixed(2) || 'N/A'} km</p>
+        </div>
+        
+        <h4>Parámetros de Búsqueda</h4>
         <ul>
-            <li><strong>Origen:</strong> ${data.origin_name}</li>
-            <li><strong>Destino:</strong> ${data.destination_name}</li>
+            <li><strong>Origen:</strong> ${formData.origin_name}</li>
+            <li><strong>Destino:</strong> ${formData.destination_name}</li>
             <li><strong>Tipo de Camión:</strong> ${truckType}</li>
-            <li><strong>Buffer:</strong> ${data.buffer} km</li>
-            <li><strong>Fecha:</strong> ${data.date}</li>
+            <li><strong>Desvío máximo:</strong> ${formData.buffer} km</li>
+            <li><strong>Carga disponible:</strong> ${formData.load} kg</li>
+            <li><strong>Fecha:</strong> ${formData.date}</li>
         </ul>
-        <p><em>Nota: La funcionalidad de cálculo de rutas se implementará próximamente.</em></p>
+        
+        <h4>Rutas Alternativas (${routes.length})</h4>
+        ${routes.length === 0 ? '<p>No se encontraron rutas alternativas.</p>' : routes.map((route, idx) => `
+            <div class="route-card">
+                <h5>Ruta ${idx + 1}</h5>
+                <p><strong>Distancia total:</strong> ${route.total_distance?.toFixed(2) || 'N/A'} km</p>
+                <p><strong>Peso total:</strong> ${route.total_weight?.toFixed(2) || 'N/A'} kg</p>
+                <p><strong>Precio estimado:</strong> ${route.total_price?.toFixed(2) || 'N/A'} €</p>
+                <p><strong>Paradas:</strong> ${route.stops?.length || 0}</p>
+                ${route.stops && route.stops.length > 0 ? `
+                    <details>
+                        <summary>Ver paradas (${route.stops.length})</summary>
+                        <ul>
+                            ${route.stops.map(stop => `
+                                <li>${stop.location_name || stop.location_id} - ${stop.weight?.toFixed(2) || 'N/A'} kg</li>
+                            `).join('')}
+                        </ul>
+                    </details>
+                ` : ''}
+            </div>
+        `).join('')}
     `;
+    
+    // Draw routes on map using layer visualization
+    try {
+        if (typeof drawAllCandidates === 'function' && candidates.length > 0) {
+            console.log('Drawing candidates on map...');
+            drawAllCandidates(candidates);
+        }
+        
+        if (typeof drawAlternativeRoutes === 'function' && routes.length > 0) {
+            console.log('Drawing alternative routes on map...');
+            drawAlternativeRoutes(routes);
+        }
+    } catch (error) {
+        console.error('Error drawing visualization layers:', error);
+    }
+    
+    // Store candidates globally for metric visualization
+    currentCandidates = candidates;
+    
+    // Show the toggle button (don't auto-open the panel)
+    const toggleBtn = document.getElementById('toggle-results-btn');
+    if (toggleBtn) {
+        toggleBtn.style.display = 'flex';
+    }
+    
+    // Show candidates and metric buttons in layer control when results are available
+    const candidatesBtn = document.getElementById('layer-candidates');
+    if (candidatesBtn) {
+        candidatesBtn.style.display = 'flex';
+        // Activate candidates button by default and ensure allCandidates layer is visible
+        candidatesBtn.dataset.active = 'true';
+        map.addLayer(layerGroups.allCandidates);
+    }
+    
+    const metricBtns = document.querySelectorAll('.metric-btn');
+    metricBtns.forEach(btn => {
+        btn.style.display = 'flex';
+        btn.dataset.active = 'false'; // Ensure all metrics start inactive
+    });
+}
+
+/**
+ * Toggle results panel visibility
+ */
+function toggleResultsPanel() {
+    const panel = document.getElementById('results-panel');
+    panel.classList.toggle('active');
+}
+
+/**
+ * Close results panel
+ */
+function closeResultsPanel() {
+    const panel = document.getElementById('results-panel');
+    panel.classList.remove('active');
 }
 
 /**

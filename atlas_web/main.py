@@ -46,11 +46,15 @@ async def index(request: Request):
     """
     Render main page with form and map.
     """
+    cfg = config.Config()
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
-            "api_base_url": config.API_BASE_URL
+            "api_base_url": cfg.API_BASE_URL,
+            "map_center_lat": cfg.MAP_CENTER_LAT,
+            "map_center_lon": cfg.MAP_CENTER_LON,
+            "map_zoom": cfg.MAP_ZOOM
         }
     )
 

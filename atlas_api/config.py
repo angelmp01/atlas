@@ -24,7 +24,7 @@ elif all([os.getenv("DB_HOST"), os.getenv("DB_USER"), os.getenv("DB_PASSWORD"), 
     DB_DSN = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 else:
     # Default for local development
-    DB_DSN = "postgresql://appuser:pgai1234@lluissunol.duckdns.org:25432/gisdb"
+    DB_DSN = "postgresql://appuser:pgai1234@atlasproject.duckdns.org:25432/gisdb"
 
 # CORS Configuration (allow web frontend)
 # Can be overridden with CORS_ORIGINS environment variable (comma-separated)

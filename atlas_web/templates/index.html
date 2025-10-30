@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ATLAS - Logistics Optimization</title>
+    <link rel="icon" type="image/png" href="/static/img/favicon.png">
     <link rel="stylesheet" href="/static/css/style.css">
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -23,8 +24,6 @@
         <div class="content">
             <!-- Form Section -->
             <div class="form-section">
-                <h2>Parámetros de Ruta</h2>
-                
                 <form id="route-form">
                     <div class="form-group autocomplete-wrapper">
                         <div class="input-with-clear">
@@ -69,13 +68,7 @@
                                 <input type="radio" name="truck_type" value="normal" checked>
                                 <div class="radio-card-content">
                                     <span class="radio-card-icon">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <rect x="1" y="3" width="15" height="13" rx="2"/>
-                                            <path d="M16 8h2.667C19.403 8 20 8.597 20 9.333v3.334c0 .736-.597 1.333-1.333 1.333H16"/>
-                                            <circle cx="5.5" cy="18.5" r="2.5"/>
-                                            <circle cx="18.5" cy="18.5" r="2.5"/>
-                                            <path d="M5.5 16V6m13 10v-2"/>
-                                        </svg>
+                                        <img src="/static/img/camion-paquete.png" alt="Normal" class="truck-icon">
                                     </span>
                                     <span class="radio-card-title">Normal</span>
                                 </div>
@@ -84,10 +77,7 @@
                                 <input type="radio" name="truck_type" value="refrigerated">
                                 <div class="radio-card-content">
                                     <span class="radio-card-icon">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M12 2v20M17 7l-5 5-5-5M7 17l5-5 5 5"/>
-                                            <path d="M3 12h3m12 0h3M5 5l2 2m10 10l2 2M5 19l2-2m10-10l2-2"/>
-                                        </svg>
+                                        <img src="/static/img/camion-refrigerado.png" alt="Refrigerado" class="truck-icon">
                                     </span>
                                     <span class="radio-card-title">Refrigerado</span>
                                 </div>
@@ -96,7 +86,7 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="buffer">Buffer (km): <span id="buffer-value">30</span></label>
+                        <label for="buffer">Desvío máximo (km): <span id="buffer-value">30</span></label>
                         <input type="range" id="buffer" name="buffer" value="30" min="10" max="100" step="5" required>
                         <div class="slider-scale">
                             <span style="left: 0%;">10</span>
@@ -126,29 +116,47 @@
                         <input type="date" id="date" name="date" required>
                     </div>
 
-                    <button type="submit" class="btn-calculate">
-                        🔍 Calcular Ruta
+                    <button type="submit" class="btn-calculate" id="optimize-btn" disabled>
+                        <img src="/static/img/artificial-intelligence_3489001.png" alt="AI" class="ai-icon"> Optimizar Ruta
                     </button>
                 </form>
-
-                <div id="results" class="results"></div>
             </div>
 
             <!-- Map Section -->
             <div class="map-section">
-                <h2>Mapa de Rutas</h2>
                 <div id="map"></div>
+            </div>
+            
+            <!-- Results Panel (Right Sidebar) -->
+            <div class="results-panel" id="results-panel">
+                <div class="results-panel-header">
+                    <h3>Resultados de Optimización</h3>
+                    <button id="close-results-btn" class="close-results-btn" title="Cerrar panel">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+                <div id="results" class="results"></div>
             </div>
         </div>
     </div>
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- Main JS -->
+    
+    <!-- Configuration -->
     <script>
-        // Pass API base URL to JavaScript
-        window.API_BASE_URL = "{{ api_base_url }}";
+        // Pass configuration from backend to JavaScript
+        const API_BASE_URL = "{{ api_base_url }}";
+        const MAP_CENTER = [{{ map_center_lat }}, {{ map_center_lon }}];
+        const MAP_ZOOM = {{ map_zoom }};
     </script>
+    
+    <!-- Custom JS modules -->
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/layers.js"></script>
     <script src="/static/js/map.js"></script>
 </body>
 </html>
