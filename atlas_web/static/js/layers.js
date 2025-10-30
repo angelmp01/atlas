@@ -18,13 +18,8 @@ function visualizeResults(data) {
     // Draw candidates
     if (data.candidates_information && data.candidates_information.length > 0) {
         drawAllCandidates(data.candidates_information);
-        drawFeasibleCandidates(data.candidates_information);
-        drawProbabilityHeatmap(data.candidates_information);
-        drawPriceHeatmap(data.candidates_information);
-        drawWeightHeatmap(data.candidates_information);
-        drawScores(data.candidates_information);
-        drawETAHeatmap(data.candidates_information);
-        drawDeltaDistance(data.candidates_information);
+        // Note: Metric layers (probability, price, weight, score) are drawn on-demand
+        // when user clicks layer control buttons, not automatically
     }
     
     // Draw alternative routes
@@ -85,6 +80,9 @@ function drawScaledMetricCandidates(candidates, metric, layerGroupName, color) {
     const minValue = Math.min(...values);
     const maxValue = Math.max(...values);
     
+    // Track which location_ids are drawn in this metric layer
+    const drawnLocationIds = new Set();
+    
     // Draw each candidate with scaled radius
     candidates.forEach(candidate => {
         const value = candidate[metricKey];
@@ -131,9 +129,17 @@ function drawScaledMetricCandidates(candidates, metric, layerGroupName, color) {
         marker.on('click', () => showCandidateDetails(candidate));
         
         marker.addTo(layerGroup);
+        drawnLocationIds.add(candidate.location_id);
+        
+        // Hide the base candidate marker if it exists
+        if (window.candidateMarkersMap && window.candidateMarkersMap.has(candidate.location_id)) {
+            const baseMarker = window.candidateMarkersMap.get(candidate.location_id);
+            layerGroups.allCandidates.removeLayer(baseMarker);
+        }
     });
     
     console.log(`✅ Drew ${candidates.length} scaled ${metric} markers (${minValue.toFixed(2)} - ${maxValue.toFixed(2)})`);
+    console.log(`🔒 Hidden ${drawnLocationIds.size} base candidate markers to avoid duplicates`);
 }
 
 /**
@@ -147,8 +153,26 @@ function drawBaseRoute(baseTrip) {
         return;
     }
     
-    // Parse LineString coordinates
-    const coords = baseTrip.route_geometry.coordinates.map(c => [c[1], c[0]]);
+    // Parse GeoJSON LineString
+    let coords;
+    try {
+        const geojson = typeof baseTrip.route_geometry === 'string' 
+            ? JSON.parse(baseTrip.route_geometry) 
+            : baseTrip.route_geometry;
+        
+        if (geojson.type === 'LineString' && geojson.coordinates) {
+            // GeoJSON uses [lon, lat], Leaflet uses [lat, lon]
+            coords = geojson.coordinates.map(c => [c[1], c[0]]);
+        }
+    } catch (e) {
+        console.error('Error parsing base route geometry:', e);
+        return;
+    }
+    
+    if (!coords || coords.length === 0) {
+        console.warn('No valid coordinates in base route geometry');
+        return;
+    }
     
     // Draw route line
     const routeLine = L.polyline(coords, {
@@ -191,11 +215,15 @@ function drawBaseRoute(baseTrip) {
     console.log('✅ Base route drawn');
 }
 
+// Global map to store candidate markers by location_id for selective hiding
+window.candidateMarkersMap = new Map();
+
 /**
  * Draw all candidates as simple markers
  */
 function drawAllCandidates(candidates) {
     layerGroups.allCandidates.clearLayers();
+    window.candidateMarkersMap.clear();
     
     candidates.forEach(candidate => {
         const marker = L.circleMarker([candidate.latitude, candidate.longitude], {
@@ -221,6 +249,9 @@ function drawAllCandidates(candidates) {
         marker.on('click', () => showCandidateDetails(candidate));
         
         marker.addTo(layerGroups.allCandidates);
+        
+        // Store marker reference by location_id
+        window.candidateMarkersMap.set(candidate.location_id, marker);
     });
     
     console.log(`✅ Drew ${candidates.length} candidate markers`);
@@ -507,15 +538,37 @@ function drawAlternativeRoutes(routes) {
     routes.forEach((route, index) => {
         const color = colors[index % colors.length];
         
-        // Draw route waypoints as line
-        const coords = route.waypoints.map(w => [w.latitude, w.longitude]);
+        // Draw route using road geometry if available, otherwise straight lines
+        let routeLine;
+        if (route.route_geometry) {
+            // Parse GeoJSON and create polyline from actual road network
+            try {
+                const geojson = JSON.parse(route.route_geometry);
+                if (geojson.type === 'LineString' && geojson.coordinates.length > 0) {
+                    // GeoJSON uses [lon, lat], Leaflet uses [lat, lon]
+                    const coords = geojson.coordinates.map(c => [c[1], c[0]]);
+                    routeLine = L.polyline(coords, {
+                        color: color,
+                        weight: 5,
+                        opacity: 0.8,
+                        lineJoin: 'round'
+                    });
+                }
+            } catch (e) {
+                console.warn('Error parsing route geometry, falling back to straight lines:', e);
+            }
+        }
         
-        const routeLine = L.polyline(coords, {
-            color: color,
-            weight: 5,
-            opacity: 0.8,
-            lineJoin: 'round'
-        });
+        // Fallback: draw straight lines between waypoints
+        if (!routeLine) {
+            const coords = route.waypoints.map(w => [w.latitude, w.longitude]);
+            routeLine = L.polyline(coords, {
+                color: color,
+                weight: 5,
+                opacity: 0.8,
+                lineJoin: 'round'
+            });
+        }
         
         routeLine.bindPopup(`
             <div class="popup-content">

@@ -173,18 +173,25 @@ function setupLayerControlEvents() {
             // Deactivate all visualization buttons
             visualizationBtns.forEach(b => b.dataset.active = 'false');
             
-            // Clear and remove all visualization layers to prevent ghost markers
-            layerGroups.allCandidates.clearLayers();
+            // Clear and remove all metric visualization layers
             layerGroups.probabilityHeatmap.clearLayers();
             layerGroups.priceHeatmap.clearLayers();
             layerGroups.weightHeatmap.clearLayers();
             layerGroups.scores.clearLayers();
             
-            map.removeLayer(layerGroups.allCandidates);
             map.removeLayer(layerGroups.probabilityHeatmap);
             map.removeLayer(layerGroups.priceHeatmap);
             map.removeLayer(layerGroups.weightHeatmap);
             map.removeLayer(layerGroups.scores);
+            
+            // Restore all base candidate markers (they might have been hidden by metric layers)
+            if (window.candidateMarkersMap && window.candidateMarkersMap.size > 0) {
+                window.candidateMarkersMap.forEach((marker, locationId) => {
+                    if (!layerGroups.allCandidates.hasLayer(marker)) {
+                        layerGroups.allCandidates.addLayer(marker);
+                    }
+                });
+            }
             
             // If wasn't active, activate this one and show its layer
             if (!wasActive) {
@@ -192,35 +199,17 @@ function setupLayerControlEvents() {
                 
                 // Check if it's the candidates button or a metric button
                 if (btn.id === 'layer-candidates') {
-                    // Show all candidates without metric visualization
-                    if (currentCandidates.length > 0) {
-                        currentCandidates.forEach(candidate => {
-                            const marker = L.circleMarker([candidate.latitude, candidate.longitude], {
-                                radius: 6,
-                                fillColor: '#F59E0B',
-                                color: '#fff',
-                                weight: 1,
-                                opacity: 1,
-                                fillOpacity: 0.7
-                            });
-                            
-                            marker.bindTooltip(`
-                                <div class="tooltip-content">
-                                    <strong>${candidate.location_name}</strong><br>
-                                    ETA: ${candidate.eta_km.toFixed(1)} km<br>
-                                    Δd: ${candidate.delta_d_km.toFixed(1)} km
-                                </div>
-                            `);
-                            
-                            marker.on('click', () => showCandidateDetails(candidate));
-                            marker.addTo(layerGroups.allCandidates);
-                        });
-                        map.addLayer(layerGroups.allCandidates);
-                    }
+                    // Show all candidates layer (already restored above)
+                    map.addLayer(layerGroups.allCandidates);
                 } else {
                     // It's a metric button, show scaled visualization
+                    // First ensure allCandidates layer is on the map (will be hidden selectively)
+                    map.addLayer(layerGroups.allCandidates);
                     updateMetricVisualization();
                 }
+            } else {
+                // Was active and now deactivating - remove allCandidates layer
+                map.removeLayer(layerGroups.allCandidates);
             }
         });
     });

@@ -97,6 +97,7 @@ class AlternativeRoute(BaseModel):
     extra_distance_km: float  # Sum of all deltas
     total_score: float  # Sum of scores of all waypoints
     total_expected_weight_kg: float  # Sum of expected weights
+    route_geometry: Optional[str] = None  # GeoJSON LineString for visualization
 
 
 class InferenceResponse(BaseModel):
@@ -443,13 +444,96 @@ def calculate_base_route(conn, origin_id: str, destination_id: str) -> Dict[str,
     BASE_COST_PER_KM = 1.0
     cost_eur = distance_km * BASE_COST_PER_KM
     
+    # Get route geometry for visualization
+    waypoints = [origin, destination]
+    route_geometry = calculate_route_geometry(conn, waypoints)
+    
     return {
         "distance_km": round(distance_km, 2),
         "time_minutes": round(time_minutes, 2),
         "cost_eur": round(cost_eur, 2),
         "origin": origin,
-        "destination": destination
+        "destination": destination,
+        "route_geometry": route_geometry
     }
+
+
+def calculate_route_geometry(conn, waypoints: List[Dict[str, Any]]) -> str:
+    """
+    Calculate route geometry for a multi-waypoint route using pgRouting.
+    Returns only the coordinates as a GeoJSON LineString for visualization.
+    
+    Args:
+        conn: Database connection
+        waypoints: List of waypoints with latitude, longitude (in sequence order)
+        
+    Returns:
+        GeoJSON LineString string with all route coordinates
+    """
+    if len(waypoints) < 2:
+        return '{"type":"LineString","coordinates":[]}'
+    
+    # Find nearest nodes for all waypoints
+    node_query = text("""
+        SELECT id 
+        FROM app.ways_vertices_pgr 
+        ORDER BY the_geom <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326) 
+        LIMIT 1
+    """)
+    
+    nodes = []
+    for wp in waypoints:
+        node_id = conn.execute(node_query, {
+            "lon": wp["longitude"],
+            "lat": wp["latitude"]
+        }).scalar()
+        if node_id:
+            nodes.append(node_id)
+    
+    if len(nodes) < 2:
+        return '{"type":"LineString","coordinates":[]}'
+    
+    # Calculate routes between consecutive waypoints and collect all geometries
+    all_coordinates = []
+    
+    for i in range(len(nodes) - 1):
+        segment_query = text("""
+            SELECT ST_AsGeoJSON(w.the_geom) as geometry
+            FROM pgr_dijkstra(
+                'SELECT gid as id, source, target, cost, reverse_cost FROM app.ways',
+                :start_node,
+                :end_node,
+                directed := true
+            ) r
+            LEFT JOIN app.ways w ON r.edge = w.gid
+            WHERE r.edge IS NOT NULL
+            ORDER BY r.seq
+        """)
+        
+        result = conn.execute(segment_query, {
+            "start_node": nodes[i],
+            "end_node": nodes[i + 1]
+        })
+        
+        # Extract coordinates from each segment
+        for row in result:
+            if row.geometry:
+                import json
+                geom = json.loads(row.geometry)
+                if geom.get("type") == "LineString" and "coordinates" in geom:
+                    # Add coordinates, avoiding duplicates at connection points
+                    coords = geom["coordinates"]
+                    if not all_coordinates or coords[0] != all_coordinates[-1]:
+                        all_coordinates.extend(coords)
+                    else:
+                        all_coordinates.extend(coords[1:])
+    
+    # Build final GeoJSON LineString
+    import json
+    return json.dumps({
+        "type": "LineString",
+        "coordinates": all_coordinates
+    })
 
 
 # ============================================================================
@@ -780,6 +864,7 @@ def build_routes_greedy(
     base_distance_km: float,
     buffer_km: float,
     capacity_kg: float,
+    conn,  # Database connection for route geometry calculation
     num_routes: int = 3
 ) -> List[AlternativeRoute]:
     """
@@ -877,13 +962,24 @@ def build_routes_greedy(
             # Total distance = base_distance + extra_distance
             total_distance = base_distance_km + total_delta
             
+            # Calculate route geometry for visualization
+            waypoint_coords = [
+                {
+                    "latitude": wp.latitude,
+                    "longitude": wp.longitude
+                }
+                for wp in waypoints
+            ]
+            route_geometry = calculate_route_geometry(conn, waypoint_coords)
+            
             routes.append(AlternativeRoute(
                 route_id=route_idx + 1,
                 waypoints=waypoints,
                 total_distance_km=round(total_distance, 2),
                 extra_distance_km=round(total_delta, 2),
                 total_score=round(total_score, 4),
-                total_expected_weight_kg=round(total_weight, 2)
+                total_expected_weight_kg=round(total_weight, 2),
+                route_geometry=route_geometry
             ))
     
     logger.info(f"Generated {len(routes)} alternative routes")
@@ -933,97 +1029,87 @@ async def inference_endpoint(request: InferenceRequest):
             )
         
         # ========================================
-        # 2. CALCULATE BASE ROUTE O→D
+        # 2-5. DATABASE OPERATIONS (SINGLE CONNECTION)
         # ========================================
         engine = create_engine(config.DB_DSN)
         
         try:
             with engine.connect() as conn:
-                base_route = calculate_base_route(conn, request.origin_id, request.destination_id)
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error calculating base route: {str(e)}"
-            )
-        
-        origin = base_route['origin']
-        destination = base_route['destination']
-        base_distance_km = base_route['distance_km']
-        
-        logger.info(f"Base route: {base_distance_km} km, {base_route['time_minutes']} min")
-        
-        # ========================================
-        # 3. GET CANDIDATE LOCATIONS
-        # ========================================
-        try:
-            with engine.connect() as conn:
+                # 2. Calculate base route O→D
+                try:
+                    base_route = calculate_base_route(conn, request.origin_id, request.destination_id)
+                except ValueError as e:
+                    raise HTTPException(status_code=404, detail=str(e))
+                
+                origin = base_route['origin']
+                destination = base_route['destination']
+                base_distance_km = base_route['distance_km']
+                
+                logger.info(f"Base route: {base_distance_km} km, {base_route['time_minutes']} min")
+                
+                # 3. Get candidate locations
                 candidates_raw = get_candidate_locations(
                     conn, origin, destination, request.buffer_value_km
                 )
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error fetching candidate locations: {str(e)}"
-            )
-        
-        if not candidates_raw:
-            logger.info("No candidate locations found in corridor")
-            return InferenceResponse(
-                base_trip=base_route,
-                alternative_routes=[],
-                candidates_information=[],
-                metadata={
-                    "reason": "No candidate locations found within buffer corridor",
-                    "models_info": {
-                        "models_dir": models.get('models_dir'),
-                        "probability_version": models.get('probability_version'),
-                        "price_version": models.get('price_version'),
-                        "weight_version": models.get('weight_version')
-                    },
-                    "volume_used": False,
-                    "buffer_km": request.buffer_value_km,
-                    "capacity_kg": request.available_capacity_kg
-                }
-            )
-        
-        # ========================================
-        # 4. SCORE ALL CANDIDATES
-        # ========================================
-        candidates_scored = []
-        
-        for candidate in candidates_raw:
-            try:
-                score_info = calculate_candidate_score(
-                    candidate,
+                
+                if not candidates_raw:
+                    logger.info("No candidate locations found in corridor")
+                    return InferenceResponse(
+                        base_trip=base_route,
+                        alternative_routes=[],
+                        candidates_information=[],
+                        metadata={
+                            "reason": "No candidate locations found within buffer corridor",
+                            "models_info": {
+                                "models_dir": models.get('models_dir'),
+                                "probability_version": models.get('probability_version'),
+                                "price_version": models.get('price_version'),
+                                "weight_version": models.get('weight_version')
+                            },
+                            "volume_used": False,
+                            "buffer_km": request.buffer_value_km,
+                            "capacity_kg": request.available_capacity_kg
+                        }
+                    )
+                
+                # 4. Score all candidates
+                candidates_scored = []
+                
+                for candidate in candidates_raw:
+                    try:
+                        score_info = calculate_candidate_score(
+                            candidate,
+                            origin,
+                            destination,
+                            base_distance_km,
+                            models,
+                            request.truck_type,
+                            request.date,
+                            request.buffer_value_km
+                        )
+                        candidates_scored.append(score_info)
+                    except Exception as e:
+                        logger.error(f"Error scoring candidate {candidate['id']}: {e}")
+                        # Continue with other candidates
+                
+                logger.info(f"Scored {len(candidates_scored)} candidates")
+                
+                # 5. Build routes (greedy knapsack) - connection still open
+                routes = build_routes_greedy(
+                    candidates_scored,
                     origin,
                     destination,
                     base_distance_km,
-                    models,
-                    request.truck_type,
-                    request.date,
-                    request.buffer_value_km
+                    request.buffer_value_km,
+                    request.available_capacity_kg,
+                    conn,  # Pass database connection for geometry calculation
+                    num_routes=3
                 )
-                candidates_scored.append(score_info)
-            except Exception as e:
-                logger.error(f"Error scoring candidate {candidate['id']}: {e}")
-                # Continue with other candidates
-        
-        logger.info(f"Scored {len(candidates_scored)} candidates")
-        
-        # ========================================
-        # 5. BUILD ROUTES (GREEDY KNAPSACK)
-        # ========================================
-        routes = build_routes_greedy(
-            candidates_scored,
-            origin,
-            destination,
-            base_distance_km,
-            request.buffer_value_km,
-            request.available_capacity_kg,
-            num_routes=3
-        )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database operation error: {str(e)}"
+            )
         
         # ========================================
         # 6. BUILD RESPONSE
