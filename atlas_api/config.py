@@ -26,6 +26,10 @@ else:
     # Default for local development
     DB_DSN = "postgresql://appuser:pgai1234@atlasproject.duckdns.org:25432/gisdb"
 
+# Add UTF-8 encoding if not already present
+if "client_encoding" not in DB_DSN:
+    DB_DSN += "?client_encoding=utf8"
+
 # CORS Configuration (allow web frontend)
 # Can be overridden with CORS_ORIGINS environment variable (comma-separated)
 cors_origins_env = os.getenv("CORS_ORIGINS")

@@ -100,28 +100,42 @@ function drawScaledMetricCandidates(candidates, metric, layerGroupName, color) {
         });
         
         // Format tooltip based on metric
-        let metricLabel = metric;
-        let metricValue = value.toFixed(2);
+        let tooltipContent = '';
         
         if (metric === 'probability') {
-            metricLabel = 'Probabilidad';
-            metricValue = (value * 100).toFixed(1) + '%';
+            // Show raw probability value and f_eta (ETA score)
+            tooltipContent = `
+                <div class="tooltip-content">
+                    <strong>${candidate.location_name}</strong><br>
+                    P(probabilidad): ${candidate.p_probability.toFixed(4)}<br>
+                    ETA: ${candidate.eta_km.toFixed(1)} km<br>
+                    f_eta: ${candidate.f_eta.toFixed(4)}
+                </div>
+            `;
         } else if (metric === 'price') {
-            metricLabel = 'Precio';
-            metricValue = value.toFixed(2) + ' €';
+            tooltipContent = `
+                <div class="tooltip-content">
+                    <strong>${candidate.location_name}</strong><br>
+                    Precio: ${candidate.p_price_eur.toFixed(2)} €
+                </div>
+            `;
         } else if (metric === 'weight') {
-            metricLabel = 'Peso';
-            metricValue = value.toFixed(2) + ' kg';
+            tooltipContent = `
+                <div class="tooltip-content">
+                    <strong>${candidate.location_name}</strong><br>
+                    Peso: ${candidate.p_weight_kg.toFixed(2)} kg
+                </div>
+            `;
         } else if (metric === 'score') {
-            metricLabel = 'Score';
+            tooltipContent = `
+                <div class="tooltip-content">
+                    <strong>${candidate.location_name}</strong><br>
+                    Score: ${candidate.score.toFixed(4)}
+                </div>
+            `;
         }
         
-        marker.bindTooltip(`
-            <div class="tooltip-content">
-                <strong>${candidate.location_name}</strong><br>
-                ${metricLabel}: ${metricValue}
-            </div>
-        `, {
+        marker.bindTooltip(tooltipContent, {
             direction: 'top',
             offset: [0, -radius]
         });

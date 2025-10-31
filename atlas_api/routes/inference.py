@@ -559,18 +559,28 @@ def calculate_geodesic_distance(loc1: Dict, loc2: Dict) -> float:
 
 def calculate_eta_score(eta_km: float) -> float:
     """
-    Calculate ETA scoring function: f_ETA = 1 / (1 + ETA_km)
+    Calculate ETA scoring function: f_ETA = ETA_km
     
-    Decreasing function without hyperparameters.
-    Closer candidates get higher scores.
+    Linear function: more travel time = more time for loads to appear during the day.
+    This multiplies the daily probability prediction to account for time factor.
+    
+    Interpretation: If the truck travels X km to reach a candidate, there are X km
+    worth of travel time for loads to appear at that location. The probability
+    prediction is scaled proportionally to this travel distance.
+    
+    At origin (0 km): no travel time yet, so 0% of daily probability applies.
+    At destination (km_od): full journey time has passed, so 100% of daily probability applies.
+    
+    Since km_od is constant for all candidates in a route optimization, we can
+    directly use eta_km for ranking (the constant factor doesn't affect order).
     
     Args:
         eta_km: Distance from origin to candidate in km
         
     Returns:
-        ETA score in range (0, 1]
+        ETA score (linear with distance)
     """
-    return 1.0 / (1.0 + eta_km)
+    return eta_km
 
 
 def predict_ml_features(
@@ -825,13 +835,16 @@ def calculate_candidate_score(
         destination['latitude'], destination['longitude']
     )
     
-    # Score formula: f_eta × (Pv × X) × (Pp × Y) × (Pw × Z)
+    # Score formula: (Pv × f_eta × X) × (Pp × Y) / (Pw × Z)
+    # f_eta multiplies probability: more travel time = more time for loads to appear
+    # Weight divides: higher predicted weight = worse (less capacity remaining)
     # Weighting factors (configurable constants)
     X = 10.0  # Probability weight
     Y = 0.01  # Price weight (€ → scale)
-    Z = 0.001  # Weight weight (kg → scale)
+    Z = 1.0   # Weight weight (kg → scale) - now used as divisor
     
-    score = f_eta * (p_prob * X) * (p_price * Y) * (p_weight * Z)
+    # Correct formula: multiply prob by f_eta, divide by weight
+    score = (p_prob * f_eta * X) * (p_price * Y) / (p_weight * Z if p_weight > 0 else 1.0)
     
     # Score per km (for ranking candidates efficiently)
     score_per_km = score / delta_d if delta_d > 0 else score * 1000
