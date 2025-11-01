@@ -19,22 +19,23 @@ atlas/
 │   ├── preprocessing/            # Data preprocessing modules
 │   │   ├── __init__.py
 │   │   ├── data_preprocessor.py  # Main preprocessing class
-│   │   └── main.py              # Preprocessing entry point
+│   │   └── main.py               # Preprocessing entry point
 │   ├── utils/                    # Utility functions
 │   │   ├── __init__.py
-│   │   ├── logger.py            # Logging utilities
-│   │   └── file_handler.py      # File handling utilities
+│   │   ├── logger.py             # Logging utilities
+│   │   └── file_handler.py       # File handling utilities
 │   ├── __init__.py
-│   └── main.py                  # Main project entry point
+│   └── main.py                   # Main project entry point
 ├── data/                         # Data directories
-│   ├── raw/                     # Raw input data files
-│   ├── processed/               # Processed CSV outputs
-│   └── interim/                 # Intermediate processing files
+│   ├── raw/                      # Raw input data files
+│   ├── processed/                # Processed CSV outputs
+│   └── interim/                  # Intermediate processing files
 ├── config/                       # Configuration files
-│   └── config.json              # Main configuration
+│   └── config.json               # Main configuration
 ├── notebooks/                    # Jupyter notebooks for analysis
 ├── tests/                        # Unit tests
 ├── docs/                         # Documentation
+├── docker/                       # Docker files to create DB
 ├── logs/                         # Log files (auto-generated)
 ├── requirements.txt              # Python dependencies
 └── README.md                     # This file
@@ -46,6 +47,8 @@ atlas/
 
 - Python 3.8 or higher
 - pip package manager
+- docker
+- docker-compose 3.8
 
 ### Installation
 
