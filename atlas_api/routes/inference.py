@@ -393,7 +393,7 @@ def get_candidate_locations(conn, origin: Dict, destination: Dict, buffer_km: fl
 
 def calculate_base_route(conn, origin_id: str, destination_id: str) -> Dict[str, Any]:
     """
-    Calculate base route O→D using pgRouting (same as /route endpoint).
+    Calculate base route O→D using pgRouting with OSM2PO tables.
     
     Args:
         conn: Database connection
@@ -410,45 +410,48 @@ def calculate_base_route(conn, origin_id: str, destination_id: str) -> Dict[str,
     origin = get_location_info(conn, origin_id)
     destination = get_location_info(conn, destination_id)
     
-    # Find nearest nodes
-    node_query = text("""
+    # Find nearest vertices in OSM2PO graph
+    vertex_query = text("""
         SELECT id 
-        FROM app.ways_vertices_pgr 
-        ORDER BY the_geom <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326) 
+        FROM app.catalunya_truck_2po_vertex 
+        ORDER BY geom_vertex <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326) 
         LIMIT 1
     """)
     
-    origin_node = conn.execute(node_query, {
+    origin_vertex = conn.execute(vertex_query, {
         "lon": origin["longitude"],
         "lat": origin["latitude"]
     }).scalar()
     
-    dest_node = conn.execute(node_query, {
+    dest_vertex = conn.execute(vertex_query, {
         "lon": destination["longitude"],
         "lat": destination["latitude"]
     }).scalar()
     
-    if not origin_node or not dest_node:
-        raise ValueError("Cannot find road network nodes for origin/destination")
+    if not origin_vertex or not dest_vertex:
+        raise ValueError("Cannot find road network vertices for origin/destination")
     
-    # Calculate route
+    # Calculate route using OSM2PO tables
     route_query = text("""
-        SELECT 
-            SUM(w.length_m / 1000) AS total_distance_km,
-            SUM(w.cost_s / 60) AS total_time_minutes
-        FROM pgr_dijkstra(
-            'SELECT gid as id, source, target, cost, reverse_cost FROM app.ways',
-            :origin_node,
-            :dest_node,
-            directed := true
-        ) r
-        LEFT JOIN app.ways w ON r.edge = w.gid
-        WHERE r.edge IS NOT NULL
+        WITH route AS (
+            SELECT * FROM pgr_dijkstra(
+                'SELECT id, source, target, cost, reverse_cost FROM app.catalunya_truck_2po_4pgr',
+                :origin_vertex,
+                :dest_vertex,
+                true
+            )
+        )
+        SELECT
+            SUM(ST_Length(e.geom_way::geography))/1000 AS total_distance_km,
+            SUM(e.cost)/60.0 AS total_time_minutes
+        FROM route r
+        JOIN app.catalunya_truck_2po_4pgr e ON e.id = r.edge
+        WHERE r.edge <> -1
     """)
     
     result = conn.execute(route_query, {
-        "origin_node": origin_node,
-        "dest_node": dest_node
+        "origin_vertex": origin_vertex,
+        "dest_vertex": dest_vertex
     }).fetchone()
     
     if not result or result.total_distance_km is None:
@@ -491,46 +494,46 @@ def calculate_route_geometry(conn, waypoints: List[Dict[str, Any]]) -> str:
     if len(waypoints) < 2:
         return '{"type":"LineString","coordinates":[]}'
     
-    # Find nearest nodes for all waypoints
-    node_query = text("""
+    # Find nearest vertices for all waypoints using OSM2PO tables
+    vertex_query = text("""
         SELECT id 
-        FROM app.ways_vertices_pgr 
-        ORDER BY the_geom <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326) 
+        FROM app.catalunya_truck_2po_vertex 
+        ORDER BY geom_vertex <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326) 
         LIMIT 1
     """)
     
-    nodes = []
+    vertices = []
     for wp in waypoints:
-        node_id = conn.execute(node_query, {
+        vertex_id = conn.execute(vertex_query, {
             "lon": wp["longitude"],
             "lat": wp["latitude"]
         }).scalar()
-        if node_id:
-            nodes.append(node_id)
+        if vertex_id:
+            vertices.append(vertex_id)
     
-    if len(nodes) < 2:
+    if len(vertices) < 2:
         return '{"type":"LineString","coordinates":[]}'
     
     # Calculate routes between consecutive waypoints and collect all geometries
     all_coordinates = []
     
-    for i in range(len(nodes) - 1):
+    for i in range(len(vertices) - 1):
         segment_query = text("""
-            SELECT ST_AsGeoJSON(w.the_geom) as geometry
+            SELECT ST_AsGeoJSON(e.geom_way) as geometry
             FROM pgr_dijkstra(
-                'SELECT gid as id, source, target, cost, reverse_cost FROM app.ways',
-                :start_node,
-                :end_node,
-                directed := true
+                'SELECT id, source, target, cost, reverse_cost FROM app.catalunya_truck_2po_4pgr',
+                :start_vertex,
+                :end_vertex,
+                true
             ) r
-            LEFT JOIN app.ways w ON r.edge = w.gid
-            WHERE r.edge IS NOT NULL
+            JOIN app.catalunya_truck_2po_4pgr e ON e.id = r.edge
+            WHERE r.edge <> -1
             ORDER BY r.seq
         """)
         
         result = conn.execute(segment_query, {
-            "start_node": nodes[i],
-            "end_node": nodes[i + 1]
+            "start_vertex": vertices[i],
+            "end_vertex": vertices[i + 1]
         })
         
         # Extract coordinates from each segment

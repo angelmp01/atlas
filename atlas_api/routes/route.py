@@ -1,19 +1,20 @@
 """
 Route calculation endpoint for ATLAS API.
 
-Calculates optimal route between origin and destination using pgRouting.
+Calculates optimal route between origin and destination using OSM2PO graph with pgRouting.
+Uses new tables: app.catalunya_truck_2po_4pgr (edges) and app.catalunya_truck_2po_vertex (vertices)
 """
 from fastapi import APIRouter, HTTPException, Query
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any
 import logging
-from sqlalchemy import create_engine, text
+import json
+from sqlalchemy import create_engine, text, exc
 
 from .. import config
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/route", tags=["route"])
-
 
 @router.get("", response_model=Dict[str, Any])
 async def calculate_route(
@@ -23,22 +24,17 @@ async def calculate_route(
     """
     Calculate optimal route between origin and destination.
     
-    Uses pgRouting (Dijkstra algorithm) to find shortest path on road network.
+    Uses OSM2PO graph with pgRouting (Dijkstra algorithm).
     
     Args:
-        origin_id: Location ID for origin
-        destination_id: Location ID for destination
+        origin_id: Location ID for origin (e.g., "08019")
+        destination_id: Location ID for destination (e.g., "25120")
         
     Returns:
-        JSON with route information:
-        - origin: Origin location details
-        - destination: Destination location details
-        - route_segments: List of route segments with geometry
-        - summary: Total distance, time, number of segments
-        
-    Example:
-        GET /route?origin_id=08019&destination_id=25120
+        JSON with route information
     """
+    logger.info(f"Route request: {origin_id} -> {destination_id}")
+    
     try:
         engine = create_engine(config.DB_DSN)
         
@@ -93,141 +89,111 @@ async def calculate_route(
                 "latitude": float(dest_result.latitude)
             }
             
-            # 3. Find nearest road network node to origin
-            origin_node_query = text("""
+            # 3. Find nearest vertex to origin using OSM2PO tables
+            origin_vertex_query = text("""
                 SELECT id 
-                FROM app.ways_vertices_pgr 
-                ORDER BY the_geom <-> ST_SetSRID(
+                FROM app.catalunya_truck_2po_vertex 
+                ORDER BY geom_vertex <-> ST_SetSRID(
                     ST_MakePoint(:lon, :lat), 4326
                 ) 
                 LIMIT 1
             """)
-            origin_node = conn.execute(
-                origin_node_query, 
+            origin_vertex = conn.execute(
+                origin_vertex_query, 
                 {"lon": origin_info["longitude"], "lat": origin_info["latitude"]}
             ).scalar()
             
-            if not origin_node:
+            if not origin_vertex:
                 raise HTTPException(
                     status_code=500,
-                    detail="Could not find nearest road network node to origin"
+                    detail="Could not find nearest road network vertex to origin"
                 )
             
-            logger.info(f"Origin node: {origin_node}")
-            
-            # 4. Find nearest road network node to destination
-            dest_node_query = text("""
+            # 4. Find nearest vertex to destination using OSM2PO tables
+            dest_vertex_query = text("""
                 SELECT id 
-                FROM app.ways_vertices_pgr 
-                ORDER BY the_geom <-> ST_SetSRID(
+                FROM app.catalunya_truck_2po_vertex 
+                ORDER BY geom_vertex <-> ST_SetSRID(
                     ST_MakePoint(:lon, :lat), 4326
                 ) 
                 LIMIT 1
             """)
-            dest_node = conn.execute(
-                dest_node_query,
+            dest_vertex = conn.execute(
+                dest_vertex_query,
                 {"lon": dest_info["longitude"], "lat": dest_info["latitude"]}
             ).scalar()
             
-            if not dest_node:
+            if not dest_vertex:
                 raise HTTPException(
                     status_code=500,
-                    detail="Could not find nearest road network node to destination"
+                    detail="Could not find nearest road network vertex to destination"
                 )
             
-            logger.info(f"Destination node: {dest_node}")
-            
-            # 5. Calculate route using pgr_dijkstra
+            # 5. Calculate route using pgr_dijkstra on OSM2PO tables - get segments
             route_query = text("""
-                SELECT 
-                    r.seq,
-                    r.node,
-                    r.edge,
-                    r.cost,
-                    r.agg_cost,
-                    w.name,
-                    w.length_m,
-                    w.length_m / 1000 AS length_km,
-                    w.cost_s,
-                    w.cost_s / 60 AS cost_minutes,
-                    w.maxspeed_forward,
-                    w.maxspeed_backward,
-                    ST_AsGeoJSON(w.the_geom) as geometry
-                FROM pgr_dijkstra(
-                    'SELECT gid as id, source, target, cost, reverse_cost FROM app.ways',
-                    :origin_node,
-                    :dest_node,
-                    directed := true
-                ) r
-                LEFT JOIN app.ways w ON r.edge = w.gid
+                WITH route AS (
+                    SELECT * FROM pgr_dijkstra(
+                        'SELECT id, source, target, cost, reverse_cost FROM app.catalunya_truck_2po_4pgr',
+                        :origin_vertex, :dest_vertex, true
+                    )
+                )
+                SELECT
+                    e.id,
+                    e.cost,
+                    ST_Length(e.geom_way::geography)/1000 AS segment_km,
+                    ST_AsGeoJSON(e.geom_way) AS geometry
+                FROM route r
+                JOIN app.catalunya_truck_2po_4pgr e ON e.id = r.edge
+                WHERE r.edge <> -1
                 ORDER BY r.seq
             """)
             
-            route_result = conn.execute(
+            segments_result = conn.execute(
                 route_query,
-                {"origin_node": origin_node, "dest_node": dest_node}
-            )
+                {"origin_vertex": origin_vertex, "dest_vertex": dest_vertex}
+            ).fetchall()
             
-            # 6. Process route segments
-            segments = []
-            total_distance_km = 0
-            total_time_minutes = 0
-            
-            for row in route_result:
-                # Skip the last row (destination node with no edge)
-                if row.edge is None:
-                    continue
-                
-                segment = {
-                    "seq": row.seq,
-                    "node": row.node,
-                    "edge": row.edge,
-                    "cost": float(row.cost) if row.cost else None,
-                    "agg_cost": float(row.agg_cost) if row.agg_cost else None,
-                    "name": row.name,
-                    "length_m": float(row.length_m) if row.length_m else None,
-                    "length_km": float(row.length_km) if row.length_km else None,
-                    "cost_s": float(row.cost_s) if row.cost_s else None,
-                    "cost_minutes": float(row.cost_minutes) if row.cost_minutes else None,
-                    "maxspeed_forward": row.maxspeed_forward,
-                    "maxspeed_backward": row.maxspeed_backward,
-                    "geometry": row.geometry  # GeoJSON string
-                }
-                
-                segments.append(segment)
-                
-                if row.length_km:
-                    total_distance_km += float(row.length_km)
-                if row.cost_minutes:
-                    total_time_minutes += float(row.cost_minutes)
-            
-            if not segments:
+            if not segments_result:
                 raise HTTPException(
                     status_code=404,
                     detail=f"No route found between {origin_id} and {destination_id}"
                 )
             
-            # 7. Build response
+            # Build segments array with geometries
+            segments = []
+            total_km = 0
+            total_min = 0
+            
+            for seg in segments_result:
+                segment_km = float(seg.segment_km) if seg.segment_km else 0
+                segment_min = float(seg.cost) / 60.0 if seg.cost else 0
+                total_km += segment_km
+                total_min += segment_min
+                
+                segments.append({
+                    "id": seg.id,
+                    "distance_km": round(segment_km, 3),
+                    "time_minutes": round(segment_min, 2),
+                    "geometry": seg.geometry
+                })
+            
+            # 6. Build response
             response = {
                 "origin": origin_info,
                 "destination": dest_info,
-                "route_nodes": {
-                    "origin_node": origin_node,
-                    "destination_node": dest_node
-                },
-                "segments": segments,
                 "summary": {
-                    "total_segments": len(segments),
-                    "total_distance_km": round(total_distance_km, 2),
-                    "total_time_minutes": round(total_time_minutes, 2),
-                    "total_time_hours": round(total_time_minutes / 60, 2)
-                }
+                    "total_distance_km": round(total_km, 2),
+                    "total_time_minutes": round(total_min, 2),
+                    "total_time_hours": round(total_min / 60, 2),
+                    "total_segments": len(segments)
+                },
+                "segments": segments
             }
             
             logger.info(
                 f"Route calculated: {origin_id} -> {destination_id}, "
-                f"{len(segments)} segments, {total_distance_km:.2f} km, "
-                f"{total_time_minutes:.2f} min"
+                f"{response['summary']['total_distance_km']} km, "
+                f"{response['summary']['total_time_minutes']} min"
             )
             
             return response
@@ -240,3 +206,39 @@ async def calculate_route(
             status_code=500,
             detail=f"Error calculating route: {str(e)}"
         )
+
+
+@router.get("/health", response_model=Dict[str, Any])
+async def route_health():
+    """Health check for routing service."""
+    try:
+        engine = create_engine(config.DB_DSN)
+        
+        with engine.connect() as conn:
+            health_query = text("""
+                SELECT
+                    (SELECT COUNT(*) FROM app.catalunya_truck_2po_4pgr) as edge_count,
+                    (SELECT COUNT(*) FROM app.catalunya_truck_2po_vertex) as vertex_count
+            """)
+            health_result = conn.execute(health_query).fetchone()
+            
+            if health_result:
+                return {
+                    "status": "healthy",
+                    "routing_service": "operational",
+                    "graph": {
+                        "edge_count": int(health_result[0]) if health_result[0] else 0,
+                        "vertex_count": int(health_result[1]) if health_result[1] else 0
+                    }
+                }
+            else:
+                return {"status": "degraded", "routing_service": "unable_to_check"}
+            
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "message": str(e),
+            "routing_service": "unavailable"
+        }
+
