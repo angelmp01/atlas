@@ -7,6 +7,36 @@
  * - Map initialization and interaction
  */
 
+/**
+ * Format location name by removing "agregacion de municipios" and reordering comma-separated parts
+ * @param {string} rawName - Raw location name from database
+ * @returns {string} - Formatted location name
+ */
+function formatLocationName(rawName) {
+    if (!rawName) return '';
+    
+    // Remove "agregacion de municipios" (case insensitive)
+    let name = rawName.replace(/agregacion de municipios/gi, '').trim();
+    
+    // Handle comma-separated names (e.g., "Escala, L'" or "Franqueses del Vallès, Les")
+    if (name.includes(',')) {
+        const parts = name.split(',').map(p => p.trim());
+        if (parts.length === 2) {
+            const [first, second] = parts;
+            // Check if second part ends with apostrophe
+            if (second.endsWith("'")) {
+                // Concatenate without space: "L'" + "Escala" = "L'Escala"
+                name = second + first;
+            } else {
+                // Concatenate with space: "Les" + " " + "Franqueses del Vallès"
+                name = second + ' ' + first;
+            }
+        }
+    }
+    
+    return name;
+}
+
 // Global map instance (API_BASE_URL, MAP_CENTER, MAP_ZOOM are set by server in HTML)
 let map = null;
 let markers = {};
@@ -93,8 +123,8 @@ function initMap() {
             this._div.innerHTML = `
                 <h4>🗺️ Ruta Calculada</h4>
                 <div style="line-height: 1.6;">
-                    <strong>Origen:</strong> ${data.origin}<br/>
-                    <strong>Destino:</strong> ${data.destination}<br/>
+                    <strong>Origen:</strong> ${formatLocationName(data.origin)}<br/>
+                    <strong>Destino:</strong> ${formatLocationName(data.destination)}<br/>
                     <hr style="margin: 8px 0; border: none; border-top: 1px solid #ddd;">
                     <strong>Distancia:</strong> ${data.distance} km<br/>
                     <strong>Tiempo:</strong> ${data.time}<br/>
@@ -103,7 +133,7 @@ function initMap() {
             `;
         } else {
             // Show location information (on hover)
-            this._div.innerHTML = '<h4>Información</h4><b>' + data.name + '</b><br/>ID: ' + data.id;
+            this._div.innerHTML = '<h4>Información</h4><b>' + formatLocationName(data.name) + '</b><br/>ID: ' + data.id;
         }
     };
     
@@ -522,7 +552,7 @@ function selectLocationOnMap(location) {
     
     // If origin is not set, set it
     if (!originInput.dataset.locationId) {
-        originInput.value = location.name;
+        originInput.value = formatLocationName(location.name);
         originInput.dataset.locationId = location.id;
         
         // Keep all markers visible, just highlight origin in green
@@ -553,7 +583,7 @@ function selectLocationOnMap(location) {
             return;
         }
         
-        destinationInput.value = location.name;
+        destinationInput.value = formatLocationName(location.name);
         destinationInput.dataset.locationId = location.id;
         
         showStatus('Destino seleccionado. Puedes calcular la ruta.', 'success', 3000);
@@ -597,8 +627,9 @@ function initAutocomplete(fieldId) {
         // Display suggestions
         if (currentSuggestions.length > 0) {
             suggestionsDiv.innerHTML = currentSuggestions.map((loc, index) => {
-                const highlightedName = highlightMatch(loc.name, query);
-                return `<div class="autocomplete-suggestion" data-index="${index}" data-id="${loc.id}" data-name="${loc.name}">
+                const formattedName = formatLocationName(loc.name);
+                const highlightedName = highlightMatch(formattedName, query);
+                return `<div class="autocomplete-suggestion" data-index="${index}" data-id="${loc.id}" data-name="${formattedName}">
                     ${highlightedName}
                 </div>`;
             }).join('');
@@ -1036,6 +1067,12 @@ function displayInferenceResults(response, formData) {
     
     // Draw routes on map using layer visualization
     try {
+        // Draw base route with truck type
+        if (typeof drawBaseRoute === 'function' && response.base_trip) {
+            console.log('Drawing base route on map...');
+            drawBaseRoute(response.base_trip, formData.truck_type);
+        }
+        
         if (typeof drawAllCandidates === 'function' && candidates.length > 0) {
             console.log('Drawing candidates on map...');
             drawAllCandidates(candidates);
@@ -1043,7 +1080,12 @@ function displayInferenceResults(response, formData) {
         
         if (typeof drawAlternativeRoutes === 'function' && routes.length > 0) {
             console.log('Drawing alternative routes on map...');
-            drawAlternativeRoutes(routes);
+            drawAlternativeRoutes(routes, formData.truck_type);
+        }
+        
+        // Show route legend if we have alternative routes
+        if (routes.length > 0) {
+            showRouteLegend(routes);
         }
     } catch (error) {
         console.error('Error drawing visualization layers:', error);
@@ -1237,5 +1279,59 @@ async function drawRouteFromAPI(originId, destinationId) {
             const bounds = L.latLngBounds([originLatLng, destLatLng]);
             map.fitBounds(bounds, { padding: [50, 50] });
         }
+    }
+}
+
+/**
+ * Show route legend at bottom of map
+ * @param {Array} routes - Array of alternative routes
+ */
+function showRouteLegend(routes) {
+    const legend = document.getElementById('route-legend');
+    const itemsContainer = document.getElementById('route-legend-items');
+    
+    if (!legend || !itemsContainer) return;
+    
+    // Route colors (same as in layers.js) - colorblind-friendly
+    const colors = ['#0173B2', '#DE8F05', '#CC78BC', '#029E73', '#ECE133'];
+    
+    // Clear existing items
+    itemsContainer.innerHTML = '';
+    
+    // Create legend item for each route
+    routes.forEach((route, idx) => {
+        const color = colors[idx % colors.length];
+        
+        // Calculate estimated time based on distance (avg 60 km/h)
+        const distanceKm = route.total_distance_km || route.total_distance || 0;
+        const estimatedMinutes = Math.round((distanceKm / 60) * 60);
+        const hours = Math.floor(estimatedMinutes / 60);
+        const minutes = estimatedMinutes % 60;
+        const timeText = hours > 0 ? `${hours}h ${minutes}min` : `${minutes}min`;
+        
+        const item = document.createElement('div');
+        item.className = 'route-legend-item';
+        item.innerHTML = `
+            <div class="route-legend-color" style="background-color: ${color};"></div>
+            <div class="route-legend-info">
+                <div class="route-legend-label">Ruta ${idx + 1}</div>
+                <div class="route-legend-stats">${timeText} • ${distanceKm.toFixed(1)} km</div>
+            </div>
+        `;
+        
+        itemsContainer.appendChild(item);
+    });
+    
+    // Show legend
+    legend.style.display = 'block';
+}
+
+/**
+ * Hide route legend
+ */
+function hideRouteLegend() {
+    const legend = document.getElementById('route-legend');
+    if (legend) {
+        legend.style.display = 'none';
     }
 }

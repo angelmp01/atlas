@@ -321,31 +321,49 @@ def get_candidate_locations(conn, origin: Dict, destination: Dict, buffer_km: fl
     )
     angle_deg = np.degrees(angle_rad)
     
-    # Query using ellipse
-    # ST_Buffer creates circular, but we can approximate ellipse using rectangular corridor
-    # For simplicity: use rectangular corridor with ST_MakeLine and ST_Buffer
+    # Query using rectangular corridor
+    # Constraints:
+    # - Longitudinal (X axis): candidates must be BETWEEN origin and destination (not before/after)
+    # - Lateral (Y axis): candidates can deviate ±buffer_km/2 from the direct line O→D
     query = text("""
         WITH route_line AS (
-            SELECT ST_MakeLine(
-                ST_SetSRID(ST_MakePoint(:origin_lon, :origin_lat), 4326),
-                ST_SetSRID(ST_MakePoint(:dest_lon, :dest_lat), 4326)
-            ) AS geom
+            SELECT 
+                ST_MakeLine(
+                    ST_SetSRID(ST_MakePoint(:origin_lon, :origin_lat), 4326),
+                    ST_SetSRID(ST_MakePoint(:dest_lon, :dest_lat), 4326)
+                ) AS geom,
+                ST_SetSRID(ST_MakePoint(:origin_lon, :origin_lat), 4326)::geography AS origin_geog,
+                ST_SetSRID(ST_MakePoint(:dest_lon, :dest_lat), 4326)::geography AS dest_geog
         ),
-        corridor AS (
-            SELECT ST_Buffer(
-                route_line.geom::geography,
-                :buffer_m
-            )::geometry AS geom
+        bounds AS (
+            SELECT 
+                LEAST(:origin_lon, :dest_lon) AS min_lon,
+                GREATEST(:origin_lon, :dest_lon) AS max_lon,
+                LEAST(:origin_lat, :dest_lat) AS min_lat,
+                GREATEST(:origin_lat, :dest_lat) AS max_lat
             FROM route_line
         )
         SELECT 
             l.location_id,
             l.location_name,
             l.longitude,
-            l.latitude
-        FROM app.sodd_locations l, corridor
-        WHERE ST_Contains(corridor.geom, ST_SetSRID(ST_MakePoint(l.longitude, l.latitude), 4326))
-        AND l.location_id NOT IN (:origin_id, :dest_id)
+            l.latitude,
+            ST_Distance(
+                route_line.geom::geography,
+                ST_SetSRID(ST_MakePoint(l.longitude, l.latitude), 4326)::geography
+            ) AS distance_to_line_m
+        FROM app.sodd_locations l, route_line, bounds
+        WHERE 
+            -- Lateral constraint: distance to line O→D <= buffer_km (perpendicular distance)
+            ST_Distance(
+                route_line.geom::geography,
+                ST_SetSRID(ST_MakePoint(l.longitude, l.latitude), 4326)::geography
+            ) <= :buffer_m
+            -- Longitudinal constraint: must be between O and D (bounding box)
+            AND l.longitude BETWEEN bounds.min_lon AND bounds.max_lon
+            AND l.latitude BETWEEN bounds.min_lat AND bounds.max_lat
+            -- Exclude origin and destination
+            AND l.location_id NOT IN (:origin_id, :dest_id)
         ORDER BY l.location_id
     """)
     

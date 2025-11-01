@@ -4,15 +4,46 @@
  */
 
 /**
+ * Format location name by removing "agregacion de municipios" and reordering comma-separated parts
+ * @param {string} rawName - Raw location name from database
+ * @returns {string} - Formatted location name
+ */
+function formatLocationName(rawName) {
+    if (!rawName) return '';
+    
+    // Remove "agregacion de municipios" (case insensitive)
+    let name = rawName.replace(/agregacion de municipios/gi, '').trim();
+    
+    // Handle comma-separated names (e.g., "Escala, L'" or "Franqueses del Vallès, Les")
+    if (name.includes(',')) {
+        const parts = name.split(',').map(p => p.trim());
+        if (parts.length === 2) {
+            const [first, second] = parts;
+            // Check if second part ends with apostrophe
+            if (second.endsWith("'")) {
+                // Concatenate without space: "L'" + "Escala" = "L'Escala"
+                name = second + first;
+            } else {
+                // Concatenate with space: "Les" + " " + "Franqueses del Vallès"
+                name = second + ' ' + first;
+            }
+        }
+    }
+    
+    return name;
+}
+
+/**
  * Main function to visualize inference results
  * @param {Object} data - Inference response from API
+ * @param {string} truckType - Type of truck ('normal' or 'refrigerated')
  */
-function visualizeResults(data) {
+function visualizeResults(data, truckType = 'normal') {
     console.log('🎨 Visualizing results...');
     
     // Draw base route (O→D)
     if (data.base_trip) {
-        drawBaseRoute(data.base_trip);
+        drawBaseRoute(data.base_trip, truckType);
     }
     
     // Draw candidates
@@ -106,7 +137,7 @@ function drawScaledMetricCandidates(candidates, metric, layerGroupName, color) {
             // Show raw probability value and f_eta (ETA score)
             tooltipContent = `
                 <div class="tooltip-content">
-                    <strong>${candidate.location_name}</strong><br>
+                    <strong>${formatLocationName(candidate.location_name)}</strong><br>
                     P(probabilidad): ${candidate.p_probability.toFixed(4)}<br>
                     ETA: ${candidate.eta_km.toFixed(1)} km<br>
                     f_eta: ${candidate.f_eta.toFixed(4)}
@@ -115,21 +146,21 @@ function drawScaledMetricCandidates(candidates, metric, layerGroupName, color) {
         } else if (metric === 'price') {
             tooltipContent = `
                 <div class="tooltip-content">
-                    <strong>${candidate.location_name}</strong><br>
+                    <strong>${formatLocationName(candidate.location_name)}</strong><br>
                     Precio: ${candidate.p_price_eur.toFixed(2)} €
                 </div>
             `;
         } else if (metric === 'weight') {
             tooltipContent = `
                 <div class="tooltip-content">
-                    <strong>${candidate.location_name}</strong><br>
+                    <strong>${formatLocationName(candidate.location_name)}</strong><br>
                     Peso: ${candidate.p_weight_kg.toFixed(2)} kg
                 </div>
             `;
         } else if (metric === 'score') {
             tooltipContent = `
                 <div class="tooltip-content">
-                    <strong>${candidate.location_name}</strong><br>
+                    <strong>${formatLocationName(candidate.location_name)}</strong><br>
                     Score: ${candidate.score.toFixed(4)}
                 </div>
             `;
@@ -158,12 +189,20 @@ function drawScaledMetricCandidates(candidates, metric, layerGroupName, color) {
 
 /**
  * Draw base route (direct O→D without deviations)
+ * @param {Object} baseTrip - Base trip data
+ * @param {string} truckType - Type of truck ('normal' or 'refrigerated')
  */
-function drawBaseRoute(baseTrip) {
+function drawBaseRoute(baseTrip, truckType = 'normal') {
     layerGroups.baseRoute.clearLayers();
     
+    // Validate required fields
     if (!baseTrip.route_geometry) {
         console.warn('No route geometry for base trip');
+        return;
+    }
+    
+    if (!baseTrip.origin_lat || !baseTrip.origin_lon || !baseTrip.destination_lat || !baseTrip.destination_lon) {
+        console.error('Missing origin/destination coordinates in base trip:', baseTrip);
         return;
     }
     
@@ -200,29 +239,29 @@ function drawBaseRoute(baseTrip) {
     routeLine.bindPopup(`
         <div class="popup-content">
             <h3>🚛 Ruta Base</h3>
-            <p><strong>Origen:</strong> ${baseTrip.origin_name || baseTrip.origin_id}</p>
-            <p><strong>Destino:</strong> ${baseTrip.destination_name || baseTrip.destination_id}</p>
+            <p><strong>Origen:</strong> ${formatLocationName(baseTrip.origin_name) || baseTrip.origin_id}</p>
+            <p><strong>Destino:</strong> ${formatLocationName(baseTrip.destination_name) || baseTrip.destination_id}</p>
             <p><strong>Distancia:</strong> ${baseTrip.distance_km.toFixed(1)} km</p>
         </div>
     `);
     
-    // Origin marker
+    // Origin marker - use emoji truck icon
     L.marker([baseTrip.origin_lat, baseTrip.origin_lon], {
         icon: createCustomIcon('🚛', '#3B82F6', 'large')
     }).bindPopup(`
         <div class="popup-content">
             <h3>🚛 Origen</h3>
-            <p><strong>${baseTrip.origin_name || baseTrip.origin_id}</strong></p>
+            <p><strong>${formatLocationName(baseTrip.origin_name) || baseTrip.origin_id}</strong></p>
         </div>
     `).addTo(layerGroups.baseRoute);
     
-    // Destination marker
+    // Destination marker - flag emoji icon
     L.marker([baseTrip.destination_lat, baseTrip.destination_lon], {
         icon: createCustomIcon('🏁', '#10B981', 'large')
     }).bindPopup(`
         <div class="popup-content">
             <h3>🏁 Destino</h3>
-            <p><strong>${baseTrip.destination_name || baseTrip.destination_id}</strong></p>
+            <p><strong>${formatLocationName(baseTrip.destination_name) || baseTrip.destination_id}</strong></p>
         </div>
     `).addTo(layerGroups.baseRoute);
     
@@ -251,7 +290,7 @@ function drawAllCandidates(candidates) {
         
         marker.bindTooltip(`
             <div class="tooltip-content">
-                <strong>${candidate.location_name}</strong><br>
+                <strong>${formatLocationName(candidate.location_name)}</strong><br>
                 ETA: ${candidate.eta_km.toFixed(1)} km<br>
                 Δd: ${candidate.delta_d_km.toFixed(1)} km
             </div>
@@ -290,7 +329,7 @@ function drawFeasibleCandidates(candidates) {
         
         marker.bindTooltip(`
             <div class="tooltip-content">
-                <strong>${candidate.location_name}</strong><br>
+                <strong>${formatLocationName(candidate.location_name)}</strong><br>
                 ${isFeasible ? '✅ Factible' : '❌ No factible'}<br>
                 Δd: ${candidate.delta_d_km.toFixed(1)} km
             </div>
@@ -331,7 +370,7 @@ function drawProbabilityHeatmap(candidates) {
         
         marker.bindTooltip(`
             <div class="tooltip-content">
-                <strong>${candidate.location_name}</strong><br>
+                <strong>${formatLocationName(candidate.location_name)}</strong><br>
                 Probabilidad: ${(candidate.p_probability * 100).toFixed(1)}%
             </div>
         `);
@@ -370,7 +409,7 @@ function drawPriceHeatmap(candidates) {
         
         marker.bindTooltip(`
             <div class="tooltip-content">
-                <strong>${candidate.location_name}</strong><br>
+                <strong>${formatLocationName(candidate.location_name)}</strong><br>
                 Precio: ${candidate.p_price_eur.toFixed(0)}€
             </div>
         `);
@@ -409,7 +448,7 @@ function drawWeightHeatmap(candidates) {
         
         marker.bindTooltip(`
             <div class="tooltip-content">
-                <strong>${candidate.location_name}</strong><br>
+                <strong>${formatLocationName(candidate.location_name)}</strong><br>
                 Peso: ${candidate.p_weight_kg.toFixed(0)} kg
             </div>
         `);
@@ -451,7 +490,7 @@ function drawScores(candidates) {
         
         marker.bindTooltip(`
             <div class="tooltip-content">
-                <strong>${candidate.location_name}</strong><br>
+                <strong>${formatLocationName(candidate.location_name)}</strong><br>
                 Score: ${candidate.score.toFixed(2)}<br>
                 Score/km: ${candidate.score_per_km.toFixed(2)}<br>
                 ${isTop10 ? '<strong>🏆 Top 10</strong>' : ''}
@@ -491,7 +530,7 @@ function drawETAHeatmap(candidates) {
         
         marker.bindTooltip(`
             <div class="tooltip-content">
-                <strong>${candidate.location_name}</strong><br>
+                <strong>${formatLocationName(candidate.location_name)}</strong><br>
                 ETA: ${candidate.eta_km.toFixed(1)} km<br>
                 f_eta: ${candidate.f_eta.toFixed(4)}
             </div>
@@ -527,7 +566,7 @@ function drawDeltaDistance(candidates) {
         
         marker.bindTooltip(`
             <div class="tooltip-content">
-                <strong>${candidate.location_name}</strong><br>
+                <strong>${formatLocationName(candidate.location_name)}</strong><br>
                 Δ distancia: ${delta.toFixed(1)} km<br>
                 ${isShortcut ? '✅ Acorta ruta' : '⚠️ Alarga ruta'}
             </div>
@@ -543,11 +582,14 @@ function drawDeltaDistance(candidates) {
 
 /**
  * Draw alternative routes (colored polylines)
+ * @param {Array} routes - Array of alternative route objects
+ * @param {string} truckType - Type of truck ('normal' or 'refrigerated')
  */
-function drawAlternativeRoutes(routes) {
+function drawAlternativeRoutes(routes, truckType = 'normal') {
     layerGroups.alternativeRoutes.clearLayers();
     
-    const colors = ['#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
+    // Colorblind-friendly palette (blue, orange, magenta)
+    const colors = ['#0173B2', '#DE8F05', '#CC78BC', '#029E73', '#ECE133'];
     
     routes.forEach((route, index) => {
         const color = colors[index % colors.length];
@@ -746,7 +788,7 @@ function showCandidateDetails(candidate) {
     const content = document.getElementById('side-panel-content');
     const title = document.getElementById('side-panel-title');
     
-    title.textContent = `📍 ${candidate.location_name}`;
+    title.textContent = `📍 ${formatLocationName(candidate.location_name)}`;
     
     content.innerHTML = `
         <div class="details-section">
@@ -813,3 +855,4 @@ function showRouteDetails(route, index) {
 }
 
 console.log('✅ Layers visualization loaded');
+
