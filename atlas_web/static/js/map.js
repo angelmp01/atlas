@@ -960,7 +960,7 @@ async function handleFormSubmit(event) {
     } finally {
         // Re-validate form to re-enable button if all fields are still valid
         validateForm();
-        button.innerHTML = '<img src="/static/img/artificial-intelligence_3489001.png" alt="AI" class="ai-icon"> Optimizar Ruta';
+        button.innerHTML = '<img src="/static/img/artificial-intelligence_3489001-white.png" alt="AI" class="ai-icon"> Optimizar Ruta';
     }
 }
 
