@@ -443,7 +443,7 @@ def calculate_base_route(conn, origin_id: str, destination_id: str) -> Dict[str,
         )
         SELECT
             SUM(ST_Length(e.geom_way::geography))/1000 AS total_distance_km,
-            SUM(e.cost)/60.0 AS total_time_minutes
+            SUM(e.cost)*60.0 AS total_time_minutes
         FROM route r
         JOIN app.catalunya_truck_2po_4pgr e ON e.id = r.edge
         WHERE r.edge <> -1

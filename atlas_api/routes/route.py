@@ -174,12 +174,12 @@ async def calculate_route(
                 segments.append({
                     "id": seg.id,
                     "distance_km": round(segment_km, 3),
-                    "time_minutes": round(segment_cost, 2),
+                    "time_minutes": round(segment_cost * 60.0, 2),
                     "geometry": seg.geometry
                 })
             
             # 6. Build response
-            # Exact same calculation as inference endpoint: SUM(cost) / 60.0 = minutes
+            # cost is in HOURS, so multiply by 60 to get minutes
             total_minutes = total_cost * 60.0
             total_hours = total_cost
             

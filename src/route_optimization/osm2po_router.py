@@ -241,7 +241,7 @@ class OSM2PORouter:
                     )
                     SELECT
                         SUM(ST_Length(e.geom_way::geography))/1000 AS total_km,
-                        SUM(e.cost)/60.0                           AS total_min,
+                        SUM(e.cost)*60.0                           AS total_min,
                         ST_LineMerge(ST_Union(e.geom_way))         AS geom_route
                     FROM route r
                     JOIN {self.edge_table} e ON e.id = r.edge
