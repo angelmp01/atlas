@@ -130,6 +130,7 @@ async def calculate_route(
                 )
             
             # 5. Calculate route using pgr_dijkstra on OSM2PO tables - get segments
+            # Note: cost units depend on OSM2PO configuration (will be divided by 60 to get minutes)
             route_query = text("""
                 WITH route AS (
                     SELECT * FROM pgr_dijkstra(
@@ -139,7 +140,7 @@ async def calculate_route(
                 )
                 SELECT
                     e.id,
-                    e.cost,
+                    e.cost AS segment_cost,
                     ST_Length(e.geom_way::geography)/1000 AS segment_km,
                     ST_AsGeoJSON(e.geom_way) AS geometry
                 FROM route r
@@ -162,29 +163,33 @@ async def calculate_route(
             # Build segments array with geometries
             segments = []
             total_km = 0
-            total_min = 0
+            total_cost = 0  # cost units from database (will be divided by 60 to get minutes)
             
             for seg in segments_result:
                 segment_km = float(seg.segment_km) if seg.segment_km else 0
-                segment_min = float(seg.cost) / 60.0 if seg.cost else 0
+                segment_cost = float(seg.segment_cost) if seg.segment_cost else 0
                 total_km += segment_km
-                total_min += segment_min
+                total_cost += segment_cost
                 
                 segments.append({
                     "id": seg.id,
                     "distance_km": round(segment_km, 3),
-                    "time_minutes": round(segment_min, 2),
+                    "time_minutes": round(segment_cost, 2),
                     "geometry": seg.geometry
                 })
             
             # 6. Build response
+            # Exact same calculation as inference endpoint: SUM(cost) / 60.0 = minutes
+            total_minutes = total_cost * 60.0
+            total_hours = total_cost
+            
             response = {
                 "origin": origin_info,
                 "destination": dest_info,
                 "summary": {
                     "total_distance_km": round(total_km, 2),
-                    "total_time_minutes": round(total_min, 2),
-                    "total_time_hours": round(total_min / 60, 2),
+                    "total_time_minutes": round(total_minutes, 2),
+                    "total_time_hours": round(total_hours, 2),
                     "total_segments": len(segments)
                 },
                 "segments": segments
