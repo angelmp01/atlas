@@ -891,6 +891,63 @@ def calculate_candidate_score(
 # ROUTE CONSTRUCTION (GREEDY KNAPSACK)
 # ============================================================================
 
+def reorder_waypoints_geographically(
+    selected_candidates: List[Dict[str, Any]],
+    origin: Dict,
+    destination: Dict
+) -> List[Dict[str, Any]]:
+    """
+    Reorder selected waypoints based on their progressive position from origin to destination.
+    
+    Uses the "projection distance" method: calculate how far along the O→D line each waypoint is.
+    This ensures waypoints are visited in geographical order, avoiding backtracking.
+    
+    Args:
+        selected_candidates: List of selected waypoint candidates
+        origin: Origin location with latitude, longitude
+        destination: Destination location with latitude, longitude
+        
+    Returns:
+        Reordered list of candidates
+    """
+    if len(selected_candidates) <= 1:
+        return selected_candidates
+    
+    import math
+    
+    # Vector from origin to destination
+    dx = destination['longitude'] - origin['longitude']
+    dy = destination['latitude'] - origin['latitude']
+    
+    # Length squared (avoid sqrt for efficiency)
+    length_sq = dx*dx + dy*dy
+    
+    if length_sq == 0:
+        # Origin and destination are the same point (edge case)
+        return selected_candidates
+    
+    # Calculate projection distance for each candidate
+    candidates_with_projection = []
+    for candidate in selected_candidates:
+        # Vector from origin to candidate
+        cx = candidate['longitude'] - origin['longitude']
+        cy = candidate['latitude'] - origin['latitude']
+        
+        # Dot product gives projection length (normalized 0→1 along O→D line)
+        projection = (cx * dx + cy * dy) / length_sq
+        
+        candidates_with_projection.append({
+            'candidate': candidate,
+            'projection': projection
+        })
+    
+    # Sort by projection (candidates closer to origin come first)
+    candidates_with_projection.sort(key=lambda x: x['projection'])
+    
+    # Return reordered candidates
+    return [item['candidate'] for item in candidates_with_projection]
+
+
 def build_routes_greedy(
     candidates: List[Dict[str, Any]],
     origin: Dict,
@@ -962,6 +1019,24 @@ def build_routes_greedy(
                 used_ids.add(candidate['location_id'])
         
         if selected:
+            # ⭐ REORDER: Sort waypoints geographically to avoid backtracking
+            selected = reorder_waypoints_geographically(selected, origin, destination)
+            
+            # ⭐ RECALCULATE DISTANCES: After reordering, recalculate the actual route distance
+            # Calculate sequential distance: O → W1 → W2 → ... → Wn → D
+            waypoint_sequence = [origin] + selected + [destination]
+            actual_route_distance = 0.0
+            
+            for i in range(len(waypoint_sequence) - 1):
+                segment_distance = calculate_geodesic_distance(
+                    waypoint_sequence[i],
+                    waypoint_sequence[i + 1]
+                )
+                actual_route_distance += segment_distance
+            
+            # Recalculate delta (extra distance compared to direct route)
+            recalculated_delta = actual_route_distance - base_distance_km
+            
             # Build waypoints list: origin → candidates → destination
             waypoints = []
             
@@ -974,7 +1049,7 @@ def build_routes_greedy(
                 sequence=0
             ))
             
-            # Selected candidates (sequence 1, 2, ...)
+            # Selected candidates (sequence 1, 2, ...) - now in geographical order
             for seq, cand in enumerate(selected, start=1):
                 waypoints.append(RouteWaypoint(
                     location_id=cand['location_id'],
@@ -993,8 +1068,8 @@ def build_routes_greedy(
                 sequence=len(selected) + 1
             ))
             
-            # Total distance = base_distance + extra_distance
-            total_distance = base_distance_km + total_delta
+            # Total distance = base_distance + recalculated extra_distance
+            total_distance = base_distance_km + recalculated_delta
             
             # Calculate route geometry for visualization
             waypoint_coords = [
@@ -1010,7 +1085,7 @@ def build_routes_greedy(
                 route_id=route_idx + 1,
                 waypoints=waypoints,
                 total_distance_km=round(total_distance, 2),
-                extra_distance_km=round(total_delta, 2),
+                extra_distance_km=round(recalculated_delta, 2),  # Use recalculated delta
                 total_score=round(total_score, 4),
                 total_expected_weight_kg=round(total_weight, 2),
                 route_geometry=route_geometry
