@@ -58,6 +58,13 @@ header {
     z-index: 1;
 }
 
+.header-top {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+
 .header-logo {
     height: 60px;
     width: auto;
@@ -763,6 +770,34 @@ header {
     #map {
         height: 400px;
         flex: none;
+    }
+}
+
+/* Mobile specific styles */
+@media (max-width: 768px) {
+    header {
+        padding: 10px 15px;
+    }
+    
+    .header-content {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .header-top {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .header-logo {
+        height: 50px;
+    }
+    
+    .header-subtitle {
+        font-size: 0.9em;
+        letter-spacing: 0.5px;
+        text-align: center;
+        width: 100%;
     }
 }
 
