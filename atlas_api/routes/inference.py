@@ -768,6 +768,14 @@ def predict_ml_features(
         price_pred = models['price'].model.predict(X_price)[0]
         weight_pred = models['weight'].model.predict(X_weight)[0]
         
+        # Log raw model predictions for each candidate (fixed width for easy comparison)
+        logger.info(
+            f"Candidate {str(candidate_id):>8} → {str(destination_id):>8} | "
+            f"Prob_raw: {prob_pred:>10.6f} | "
+            f"Price_raw: {price_pred:>10.6f} | "
+            f"Weight_raw: {weight_pred:>10.6f}"
+        )
+        
         # Post-process predictions
         
         # Probability: model predicts daily trip count (possibly log-transformed)
