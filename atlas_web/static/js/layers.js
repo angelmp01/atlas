@@ -4,6 +4,19 @@
  */
 
 /**
+ * Format currency in European style (1.234,56 €)
+ * @param {number} amount - Amount to format
+ * @returns {string} - Formatted currency string
+ */
+function formatEuroCurrency(amount) {
+    if (amount === null || amount === undefined) return '0,00 €';
+    return amount.toLocaleString('es-ES', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }) + ' €';
+}
+
+/**
  * Format location name by removing "agregacion de municipios" and reordering comma-separated parts
  * @param {string} rawName - Raw location name from database
  * @returns {string} - Formatted location name
@@ -82,6 +95,78 @@ function calculateScaledRadius(value, min, max) {
 }
 
 /**
+ * Get route color and index for a candidate if it's selected in any route (utility function)
+ */
+function getCandidateRouteInfo(candidateId, routes) {
+    const colors = ['#0173B2', '#DE8F05', '#CC78BC', '#029E73', '#ECE133'];
+    
+    for (let i = 0; i < routes.length; i++) {
+        const route = routes[i];
+        if (route.waypoints) {
+            // Skip first (origin) and last (destination) waypoints
+            const intermediateWaypoints = route.waypoints.slice(1, -1);
+            for (const wp of intermediateWaypoints) {
+                if (wp.location_id === candidateId) {
+                    return {
+                        routeIndex: i,
+                        color: colors[i % colors.length],
+                        routeId: route.route_id
+                    };
+                }
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Create unified tooltip content for candidate with all metrics
+ * @param {Object} candidate - Candidate data
+ * @param {string|null} highlightMetric - Metric to highlight in bold ('probability', 'price', 'weight', 'score', or null for none)
+ * @returns {string} HTML tooltip content
+ */
+function createCandidateTooltip(candidate, highlightMetric = null) {
+    const routeInfo = getCandidateRouteInfo(candidate.location_id, window.currentRoutes || []);
+    const routeBadge = routeInfo ? `<span style="color: ${routeInfo.color}; font-weight: 600;"> • Ruta ${routeInfo.routeId}</span>` : '';
+    
+    // Format numbers
+    const formattedPrice = Math.round(candidate.p_price_eur).toLocaleString('de-DE');
+    const formattedWeight = Math.round(candidate.p_weight_kg).toLocaleString('de-DE');
+    
+    // Determine bold style for each metric
+    const probStyle = highlightMetric === 'probability' ? 'font-weight: bold;' : '';
+    const priceStyle = highlightMetric === 'price' ? 'font-weight: bold;' : '';
+    const weightStyle = highlightMetric === 'weight' ? 'font-weight: bold;' : '';
+    const scoreStyle = highlightMetric === 'score' ? 'font-weight: bold;' : '';
+    
+    return `
+        <div class="tooltip-content" style="min-width: 200px;">
+            <strong>${formatLocationName(candidate.location_name)}</strong>${routeBadge}<br>
+            <div style="display: flex; gap: 8px; margin-top: 6px; font-size: 11px; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 3px; ${probStyle}">
+                    <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Prob" style="width: 12px; height: 12px; opacity: 0.7;">
+                    <span>${(candidate.p_probability * 100).toFixed(0)}%</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 3px; ${priceStyle}">
+                    <img src="https://files.svgcdn.io/hugeicons/money-bag-02.svg" alt="Precio" style="width: 12px; height: 12px; opacity: 0.7;">
+                    <span>${formattedPrice} €</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 3px; ${weightStyle}">
+                    <img src="https://files.svgcdn.io/hugeicons/weight-scale-01.svg" alt="Peso" style="width: 12px; height: 12px; opacity: 0.7;">
+                    <span>${formattedWeight} kg</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 3px; ${scoreStyle}">
+                    <svg viewBox="0 0 24 24" fill="currentColor" style="width: 12px; height: 12px; color: #F59E0B; opacity: 0.7;">
+                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                    </svg>
+                    <span>${candidate.score.toFixed(1)}</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
  * Draw candidates with circles scaled by a specific metric
  * @param {Array} candidates - List of candidate locations
  * @param {string} metric - Metric to use for scaling ('probability', 'price', 'weight', 'score')
@@ -130,41 +215,8 @@ function drawScaledMetricCandidates(candidates, metric, layerGroupName, color) {
             fillOpacity: 0.7
         });
         
-        // Format tooltip based on metric
-        let tooltipContent = '';
-        
-        if (metric === 'probability') {
-            // Show raw probability value and f_eta (ETA score)
-            tooltipContent = `
-                <div class="tooltip-content">
-                    <strong>${formatLocationName(candidate.location_name)}</strong><br>
-                    P(probabilidad): ${candidate.p_probability.toFixed(4)}<br>
-                    ETA: ${candidate.eta_km.toFixed(1)} km<br>
-                    f_eta: ${candidate.f_eta.toFixed(4)}
-                </div>
-            `;
-        } else if (metric === 'price') {
-            tooltipContent = `
-                <div class="tooltip-content">
-                    <strong>${formatLocationName(candidate.location_name)}</strong><br>
-                    Precio: ${candidate.p_price_eur.toFixed(2)} €
-                </div>
-            `;
-        } else if (metric === 'weight') {
-            tooltipContent = `
-                <div class="tooltip-content">
-                    <strong>${formatLocationName(candidate.location_name)}</strong><br>
-                    Peso: ${candidate.p_weight_kg.toFixed(2)} kg
-                </div>
-            `;
-        } else if (metric === 'score') {
-            tooltipContent = `
-                <div class="tooltip-content">
-                    <strong>${formatLocationName(candidate.location_name)}</strong><br>
-                    Score: ${candidate.score.toFixed(4)}
-                </div>
-            `;
-        }
+        // Create unified tooltip with highlighted metric
+        const tooltipContent = createCandidateTooltip(candidate, metric);
         
         marker.bindTooltip(tooltipContent, {
             direction: 'top',
@@ -201,7 +253,15 @@ function drawBaseRoute(baseTrip, truckType = 'normal') {
         return;
     }
     
-    if (!baseTrip.origin_lat || !baseTrip.origin_lon || !baseTrip.destination_lat || !baseTrip.destination_lon) {
+    // Extract coordinates from origin and destination objects if needed
+    const originLat = baseTrip.origin_lat || baseTrip.origin?.latitude;
+    const originLon = baseTrip.origin_lon || baseTrip.origin?.longitude;
+    const destLat = baseTrip.destination_lat || baseTrip.destination?.latitude;
+    const destLon = baseTrip.destination_lon || baseTrip.destination?.longitude;
+    const originName = baseTrip.origin_name || baseTrip.origin?.name || baseTrip.origin_id;
+    const destName = baseTrip.destination_name || baseTrip.destination?.name || baseTrip.destination_id;
+    
+    if (!originLat || !originLon || !destLat || !destLon) {
         console.error('Missing origin/destination coordinates in base trip:', baseTrip);
         return;
     }
@@ -239,29 +299,29 @@ function drawBaseRoute(baseTrip, truckType = 'normal') {
     routeLine.bindPopup(`
         <div class="popup-content">
             <h3>🚛 Ruta Base</h3>
-            <p><strong>Origen:</strong> ${formatLocationName(baseTrip.origin_name) || baseTrip.origin_id}</p>
-            <p><strong>Destino:</strong> ${formatLocationName(baseTrip.destination_name) || baseTrip.destination_id}</p>
+            <p><strong>Origen:</strong> ${formatLocationName(originName)}</p>
+            <p><strong>Destino:</strong> ${formatLocationName(destName)}</p>
             <p><strong>Distancia:</strong> ${baseTrip.distance_km.toFixed(1)} km</p>
         </div>
     `);
     
     // Origin marker - use emoji truck icon
-    L.marker([baseTrip.origin_lat, baseTrip.origin_lon], {
+    L.marker([originLat, originLon], {
         icon: createCustomIcon('🚛', '#3B82F6', 'large')
     }).bindPopup(`
         <div class="popup-content">
             <h3>🚛 Origen</h3>
-            <p><strong>${formatLocationName(baseTrip.origin_name) || baseTrip.origin_id}</strong></p>
+            <p><strong>${formatLocationName(originName)}</strong></p>
         </div>
     `).addTo(layerGroups.baseRoute);
     
     // Destination marker - flag emoji icon
-    L.marker([baseTrip.destination_lat, baseTrip.destination_lon], {
+    L.marker([destLat, destLon], {
         icon: createCustomIcon('🏁', '#10B981', 'large')
     }).bindPopup(`
         <div class="popup-content">
             <h3>🏁 Destino</h3>
-            <p><strong>${formatLocationName(baseTrip.destination_name) || baseTrip.destination_id}</strong></p>
+            <p><strong>${formatLocationName(destName)}</strong></p>
         </div>
     `).addTo(layerGroups.baseRoute);
     
@@ -288,13 +348,10 @@ function drawAllCandidates(candidates) {
             fillOpacity: 0.7
         });
         
-        marker.bindTooltip(`
-            <div class="tooltip-content">
-                <strong>${formatLocationName(candidate.location_name)}</strong><br>
-                ETA: ${candidate.eta_km.toFixed(1)} km<br>
-                Δd: ${candidate.delta_d_km.toFixed(1)} km
-            </div>
-        `, {
+        // Use unified tooltip (no metric highlighted)
+        const tooltipContent = createCandidateTooltip(candidate, null);
+        
+        marker.bindTooltip(tooltipContent, {
             direction: 'top',
             offset: [0, -10]
         });
@@ -585,7 +642,7 @@ function drawDeltaDistance(candidates) {
  * @param {Array} routes - Array of alternative route objects
  * @param {string} truckType - Type of truck ('normal' or 'refrigerated')
  */
-function drawAlternativeRoutes(routes, truckType = 'normal') {
+function drawAlternativeRoutes(routes, truckType = 'normal', candidates = []) {
     layerGroups.alternativeRoutes.clearLayers();
     
     // Colorblind-friendly palette (blue, orange, magenta)
@@ -633,10 +690,11 @@ function drawAlternativeRoutes(routes, truckType = 'normal') {
                 <p><strong>Distancia:</strong> ${route.total_distance_km.toFixed(1)} km</p>
                 <p><strong>Desvío extra:</strong> +${route.extra_distance_km.toFixed(1)} km</p>
                 <p><strong>Peso esperado:</strong> ${route.total_expected_weight_kg.toFixed(0)} kg</p>
+                <p><strong>💰 Ingresos esperados:</strong> ${formatEuroCurrency(route.total_expected_revenue_eur)}</p>
                 <hr>
-                <p><strong>Waypoints:</strong></p>
+                <p><strong>Paradas:</strong></p>
                 <ul>
-                    ${route.waypoints.map(w => `<li>${w.location_name}</li>`).join('')}
+                    ${route.waypoints.map(w => `<li>${formatLocationName(w.location_name)}</li>`).join('')}
                 </ul>
             </div>
         `);
@@ -661,12 +719,50 @@ function drawAlternativeRoutes(routes, truckType = 'normal') {
             
             const marker = L.marker([waypoint.latitude, waypoint.longitude], { icon });
             
-            marker.bindPopup(`
-                <div class="popup-content">
-                    <h3 style="color: ${color}">Waypoint ${wpIndex + 1}</h3>
-                    <p><strong>${waypoint.location_name}</strong></p>
-                </div>
-            `);
+            // For intermediate waypoints (not origin/destination), find candidate data and show unified tooltip
+            if (!isOrigin && !isDestination && candidates.length > 0) {
+                const candidate = candidates.find(c => c.location_id === waypoint.location_id);
+                
+                if (candidate) {
+                    const tooltipContent = createCandidateTooltip(candidate, null);
+                    
+                    // Bind tooltip (hover)
+                    marker.bindTooltip(tooltipContent, {
+                        permanent: false,
+                        direction: 'top',
+                        offset: [0, -10]
+                    });
+                    
+                    // Bind popup (click - for mobile)
+                    marker.bindPopup(tooltipContent);
+                } else {
+                    // Fallback if candidate not found
+                    const fallbackContent = `
+                        <div style="font-weight: bold;">Parada ${wpIndex}</div>
+                        <div>${waypoint.location_name}</div>
+                    `;
+                    marker.bindTooltip(fallbackContent, {
+                        permanent: false,
+                        direction: 'top',
+                        offset: [0, -10]
+                    });
+                    marker.bindPopup(fallbackContent);
+                }
+            } else {
+                // Origin and destination keep simple display
+                const simpleContent = `
+                    <div style="font-weight: bold; color: ${color};">
+                        ${isOrigin ? '🚛 Origen' : '🏁 Destino'}
+                    </div>
+                    <div>${waypoint.location_name}</div>
+                `;
+                marker.bindTooltip(simpleContent, {
+                    permanent: false,
+                    direction: 'top',
+                    offset: [0, -10]
+                });
+                marker.bindPopup(simpleContent);
+            }
             
             marker.addTo(layerGroups.alternativeRoutes);
         });
@@ -781,77 +877,153 @@ function fitMapToBounds(data) {
 }
 
 /**
- * Show candidate details in side panel
+ * Show all candidates in results panel, ordered by distance to origin
  */
-function showCandidateDetails(candidate) {
-    const sidePanel = document.getElementById('side-panel');
-    const content = document.getElementById('side-panel-content');
-    const title = document.getElementById('side-panel-title');
+function showAllCandidatesPanel(candidates, routes, origin) {
+    const resultsPanel = document.getElementById('results-panel');
+    const resultsContent = document.getElementById('results');
+    const panelTitle = document.getElementById('results-panel-title');
     
-    title.textContent = `📍 ${formatLocationName(candidate.location_name)}`;
+    if (!candidates || candidates.length === 0) {
+        return;
+    }
     
-    content.innerHTML = `
-        <div class="details-section">
-            <h4>Ubicación</h4>
-            <p><strong>ID:</strong> ${candidate.location_id}</p>
-            <p><strong>Coordenadas:</strong> ${candidate.latitude.toFixed(4)}, ${candidate.longitude.toFixed(4)}</p>
-        </div>
-        
-        <div class="details-section">
-            <h4>Distancias</h4>
-            <p><strong>ETA (O→i):</strong> ${candidate.eta_km.toFixed(1)} km</p>
-            <p><strong>Delta (desvío):</strong> ${candidate.delta_d_km.toFixed(1)} km</p>
-            <p><strong>f_eta:</strong> ${candidate.f_eta.toFixed(4)}</p>
-        </div>
-        
-        <div class="details-section">
-            <h4>Predicciones ML</h4>
-            <p><strong>Probabilidad:</strong> ${(candidate.p_probability * 100).toFixed(1)}%</p>
-            <p><strong>Precio:</strong> ${candidate.p_price_eur.toFixed(2)}€</p>
-            <p><strong>Peso:</strong> ${candidate.p_weight_kg.toFixed(0)} kg</p>
-        </div>
-        
-        <div class="details-section">
-            <h4>Score</h4>
-            <p><strong>Total:</strong> ${candidate.score.toFixed(2)}</p>
-            <p><strong>Por km:</strong> ${candidate.score_per_km.toFixed(2)}</p>
-            <p><strong>Factible:</strong> ${candidate.is_feasible ? '✅ Sí' : '❌ No'}</p>
+    // Update panel title
+    panelTitle.textContent = `Candidatos Evaluados (${candidates.length})`;
+    
+    // Sort candidates by ETA (distance to origin)
+    const sortedCandidates = [...candidates].sort((a, b) => a.eta_km - b.eta_km);
+    
+    const colors = ['#0173B2', '#DE8F05', '#CC78BC', '#029E73', '#ECE133'];
+    
+    resultsContent.innerHTML = `
+        <div class="candidates-list">
+            ${sortedCandidates.map(candidate => {
+                // Check if candidate is selected in any route
+                const routeInfo = getCandidateRouteInfo(candidate.location_id, routes || []);
+                const backgroundColor = routeInfo ? `${routeInfo.color}15` : 'transparent';
+                const borderColor = routeInfo ? routeInfo.color : '#e0e0e0';
+                
+                // Format numbers with thousands separator (force dot separator)
+                const formattedPrice = Math.round(candidate.p_price_eur).toLocaleString('de-DE');
+                const formattedWeight = Math.round(candidate.p_weight_kg).toLocaleString('de-DE');
+                
+                return `
+                    <div class="candidate-item" style="background-color: ${backgroundColor}; border-left: 3px solid ${borderColor};" 
+                         data-candidate-id="${candidate.location_id}">
+                        <div class="candidate-name">
+                            <strong>${formatLocationName(candidate.location_name)}</strong>
+                            ${routeInfo ? `<span style="color: ${routeInfo.color}; font-weight: 600; margin-left: 4px;">Ruta ${routeInfo.routeId}</span>` : ''}
+                        </div>
+                        <div class="candidate-metrics">
+                            <div class="candidate-metric">
+                                <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Probabilidad" style="width: 14px; height: 14px;">
+                                <span>${(candidate.p_probability * 100).toFixed(0)}%</span>
+                            </div>
+                            <div class="candidate-metric">
+                                <img src="https://files.svgcdn.io/hugeicons/money-bag-02.svg" alt="Precio" style="width: 14px; height: 14px;">
+                                <span>${formattedPrice} €</span>
+                            </div>
+                            <div class="candidate-metric">
+                                <img src="https://files.svgcdn.io/hugeicons/weight-scale-01.svg" alt="Peso" style="width: 14px; height: 14px;">
+                                <span>${formattedWeight} kg</span>
+                            </div>
+                            <div class="candidate-metric">
+                                <svg viewBox="0 0 24 24" fill="currentColor" style="width: 14px; height: 14px; color: #F59E0B;">
+                                    <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                                </svg>
+                                <span>${candidate.score.toFixed(1)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
         </div>
     `;
     
-    sidePanel.classList.add('open');
+    resultsPanel.classList.add('open');
 }
 
 /**
- * Show route details in side panel
+ * Show candidate details in results panel
  */
-function showRouteDetails(route, index) {
-    const sidePanel = document.getElementById('side-panel');
-    const content = document.getElementById('side-panel-content');
-    const title = document.getElementById('side-panel-title');
+function showCandidateDetails(candidate) {
+    const resultsPanel = document.getElementById('results-panel');
+    const resultsContent = document.getElementById('results');
     
-    title.textContent = `🛣️ Ruta ${index + 1}`;
+    // Get route info if candidate is selected
+    const routeInfo = getCandidateRouteInfo(candidate.location_id, window.currentRoutes || []);
+    const routeIndicator = routeInfo 
+        ? `<span style="display: inline-block; width: 12px; height: 12px; background-color: ${routeInfo.color}; border-radius: 50%; margin-left: 8px;" title="Seleccionado en Ruta ${routeInfo.routeId}"></span>`
+        : '';
     
-    content.innerHTML = `
-        <div class="details-section">
-            <h4>Métricas</h4>
-            <p><strong>Score total:</strong> ${route.total_score.toFixed(2)}</p>
-            <p><strong>Distancia total:</strong> ${route.total_distance_km.toFixed(1)} km</p>
-            <p><strong>Desvío extra:</strong> +${route.extra_distance_km.toFixed(1)} km</p>
-            <p><strong>Peso esperado:</strong> ${route.total_expected_weight_kg.toFixed(0)} kg</p>
-        </div>
-        
-        <div class="details-section">
-            <h4>Waypoints (${route.waypoints.length})</h4>
-            <ol>
-                ${route.waypoints.map(w => `
-                    <li><strong>${w.location_name}</strong></li>
-                `).join('')}
-            </ol>
+    resultsContent.innerHTML = `
+        <div class="candidate-details">
+            <h4>📍 ${formatLocationName(candidate.location_name)}${routeIndicator}</h4>
+            
+            <div class="details-section">
+                <h5>Predicciones</h5>
+                <p>
+                    <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Probabilidad" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 4px;">
+                    <strong>Probabilidad:</strong> ${(candidate.p_probability * 100).toFixed(1)}%
+                </p>
+                <p>
+                    <img src="https://files.svgcdn.io/hugeicons/money-bag-02.svg" alt="Precio" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 4px;">
+                    <strong>Precio:</strong> ${formatEuroCurrency(candidate.p_price_eur)}
+                </p>
+                <p>
+                    <img src="https://files.svgcdn.io/hugeicons/weight-scale-01.svg" alt="Peso" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 4px;">
+                    <strong>Peso:</strong> ${candidate.p_weight_kg.toFixed(0)} kg
+                </p>
+            </div>
+            
+            <div class="details-section">
+                <h5>Score</h5>
+                <p>
+                    <svg viewBox="0 0 24 24" fill="currentColor" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 4px; color: #F59E0B;">
+                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                    </svg>
+                    <strong>Score final:</strong> ${candidate.score.toFixed(2)}
+                </p>
+            </div>
         </div>
     `;
     
-    sidePanel.classList.add('open');
+    resultsPanel.classList.add('open');
+}
+
+/**
+ * Show route details in results panel
+ */
+function showRouteDetails(route, index) {
+    const resultsPanel = document.getElementById('results-panel');
+    const resultsContent = document.getElementById('results');
+    
+    resultsContent.innerHTML = `
+        <div class="route-details">
+            <h4>🛣️ Ruta ${index + 1}</h4>
+            
+            <div class="details-section">
+                <h5>Métricas</h5>
+                <p><strong>Score total:</strong> ${route.total_score.toFixed(2)}</p>
+                <p><strong>Distancia total:</strong> ${route.total_distance_km.toFixed(1)} km</p>
+                <p><strong>Desvío extra:</strong> +${route.extra_distance_km.toFixed(1)} km</p>
+                <p><strong>Peso esperado:</strong> ${route.total_expected_weight_kg.toFixed(0)} kg</p>
+                <p><strong>💰 Ingresos esperados:</strong> ${formatEuroCurrency(route.total_expected_revenue_eur)}</p>
+            </div>
+            
+            <div class="details-section">
+                <h5>Paradas (${route.waypoints.length})</h5>
+                <ol>
+                    ${route.waypoints.map(w => `
+                        <li><strong>${formatLocationName(w.location_name)}</strong></li>
+                    `).join('')}
+                </ol>
+            </div>
+        </div>
+    `;
+    
+    resultsPanel.classList.add('open');
 }
 
 console.log('✅ Layers visualization loaded');

@@ -3,7 +3,7 @@ Locations endpoint for ATLAS API.
 
 Returns list of available locations for origin and destination selection.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from typing import List, Dict, Any
 import logging
 
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/locations", tags=["locations"])
 
 
 @router.get("", response_model=List[Dict[str, Any]])
-async def get_locations():
+async def get_locations(response: Response):
     """
     Get list of available locations.
     
@@ -31,6 +31,10 @@ async def get_locations():
         ]
     """
     try:
+        # Set cache headers - cache for 24 hours (locations don't change)
+        response.headers["Cache-Control"] = "public, max-age=86400"
+        response.headers["ETag"] = "locations-v1"
+        
         locations = get_locations_from_db(config.DB_DSN)
         logger.info(f"Returning {len(locations)} locations from database")
         return locations

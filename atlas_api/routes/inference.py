@@ -97,6 +97,7 @@ class AlternativeRoute(BaseModel):
     extra_distance_km: float  # Sum of all deltas
     total_score: float  # Sum of scores of all waypoints
     total_expected_weight_kg: float  # Sum of expected weights
+    total_expected_revenue_eur: float  # Sum of expected revenue from all waypoints
     route_geometry: Optional[str] = None  # GeoJSON LineString for visualization
 
 
@@ -995,6 +996,7 @@ def build_routes_greedy(
         total_delta = 0.0
         total_weight = 0.0
         total_score = 0.0
+        total_revenue = 0.0
         used_ids = set()
         
         # For first route: pure greedy
@@ -1016,6 +1018,7 @@ def build_routes_greedy(
                 total_delta = new_delta
                 total_weight = new_weight
                 total_score += candidate['score']
+                total_revenue += candidate['p_price_eur']
                 used_ids.add(candidate['location_id'])
         
         if selected:
@@ -1088,6 +1091,7 @@ def build_routes_greedy(
                 extra_distance_km=round(recalculated_delta, 2),  # Use recalculated delta
                 total_score=round(total_score, 4),
                 total_expected_weight_kg=round(total_weight, 2),
+                total_expected_revenue_eur=round(total_revenue, 2),
                 route_geometry=route_geometry
             ))
     

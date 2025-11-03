@@ -76,7 +76,7 @@
                                 </div>
                             </label>
                             <label class="radio-card">
-                                <input type="radio" name="truck_type" value="refrigerated">
+                                <input type="radio" name="truck_type" value="refrigerado">
                                 <div class="radio-card-content">
                                     <span class="radio-card-icon">
                                         <img src="/static/img/camion-refrigerado.png" alt="Refrigerado" class="truck-icon">
@@ -100,8 +100,8 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="load">Carga disponible (kg): <span id="load-value">2000</span></label>
-                        <input type="range" id="load" name="load" value="2500" min="500" max="11000" step="50" required>
+                        <label for="load">Carga disponible (kg): <span id="load-value">5000</span></label>
+                        <input type="range" id="load" name="load" value="5000" min="500" max="11000" step="50" required>
                         <div class="slider-scale">
                             <span style="left: 0%;">500</span>
                             <span style="left: 21%;">2.500</span>
@@ -139,7 +139,7 @@
             <!-- Results Panel (Right Sidebar) -->
             <div class="results-panel" id="results-panel">
                 <div class="results-panel-header">
-                    <h3>Resultados de Optimización</h3>
+                    <h3 id="results-panel-title">Resultados de Optimización</h3>
                     <button id="close-results-btn" class="close-results-btn" title="Cerrar panel">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="18" y1="6" x2="6" y2="18"/>
@@ -149,6 +149,7 @@
                 </div>
                 <div id="results" class="results"></div>
             </div>
+        </div>
         </div>
     </div>
 

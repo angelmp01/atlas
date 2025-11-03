@@ -8,6 +8,16 @@
  */
 
 /**
+ * Format currency with thousands separator (1.234 €)
+ * @param {number} amount - Amount to format
+ * @returns {string} - Formatted currency string
+ */
+function formatEuroCurrency(amount) {
+    if (amount === null || amount === undefined) return '0 €';
+    return Math.round(amount).toLocaleString('de-DE') + ' €';
+}
+
+/**
  * Format location name by removing "agregacion de municipios" and reordering comma-separated parts
  * @param {string} rawName - Raw location name from database
  * @returns {string} - Formatted location name
@@ -44,6 +54,8 @@ let locations = []; // Store all locations for autocomplete
 let infoControl = null; // Info panel for hover
 let layerGroups = {}; // Layer groups for visualization
 let currentCandidates = []; // Store current inference candidates for metric visualization
+let currentRoutes = []; // Store current alternative routes
+let currentOrigin = null; // Store origin location for distance calculation
 
 /**
  * Initialize the application
@@ -922,10 +934,16 @@ async function handleFormSubmit(event) {
     data.origin_name = originInput.value;
     data.destination_name = destinationInput.value;
     
-    // Show loading
+    // Show loading and disable entire form
     showStatus('Optimizando ruta...', 'info');
     const button = event.target.querySelector('button[type="submit"]');
-    button.disabled = true;
+    const formElements = event.target.querySelectorAll('input, select, button');
+    
+    // Disable all form elements
+    formElements.forEach(element => {
+        element.disabled = true;
+    });
+    
     button.innerHTML = '<span class="loading"></span> Optimizando...';
     
     try {
@@ -954,12 +972,17 @@ async function handleFormSubmit(event) {
         // Display results on map
         displayInferenceResults(response, data);
         
+        // Update button to show success state
+        button.innerHTML = '✅ Ruta optimizada!';
+        
     } catch (error) {
         console.error('Error optimizing route:', error);
         showStatus(`Error: ${error.message}`, 'error');
-    } finally {
-        // Re-validate form to re-enable button if all fields are still valid
-        validateForm();
+        
+        // Re-enable form only on error
+        formElements.forEach(element => {
+            element.disabled = false;
+        });
         button.innerHTML = '<img src="/static/img/artificial-intelligence_3489001-white.png" alt="AI" class="ai-icon"> Optimizar Ruta';
     }
 }
@@ -1022,21 +1045,27 @@ function displayInferenceResults(response, formData) {
     const routes = response.alternative_routes || [];
     const candidates = response.candidates_information || [];
     
-    // Store candidates globally for metric visualization
+    // Store candidates, routes, and origin globally
     currentCandidates = candidates;
+    currentRoutes = routes;
+    currentOrigin = response.base_trip?.origin || null;
+    
+    // Make them accessible from layers.js
+    window.currentCandidates = candidates;
+    window.currentRoutes = routes;
+    window.currentOrigin = currentOrigin;
     
     // Display summary (without h3 since it's in the header now)
     resultsDiv.innerHTML = `
         <div class="result-summary">
-            <p><strong>Rutas optimizadas:</strong> ${routes.length}</p>
             <p><strong>Candidatos analizados:</strong> ${candidates.length}</p>
-            <p><strong>Viaje base:</strong> ${response.base_trip?.distance?.toFixed(2) || 'N/A'} km</p>
+            <p><strong>Viaje base:</strong> ${response.base_trip?.distance_km?.toFixed(1) || 'N/A'} km</p>
         </div>
         
         <h4>Parámetros de Búsqueda</h4>
         <ul>
-            <li><strong>Origen:</strong> ${formData.origin_name}</li>
-            <li><strong>Destino:</strong> ${formData.destination_name}</li>
+            <li><strong>Origen:</strong> ${formatLocationName(formData.origin_name)}</li>
+            <li><strong>Destino:</strong> ${formatLocationName(formData.destination_name)}</li>
             <li><strong>Tipo de Camión:</strong> ${truckType}</li>
             <li><strong>Desvío máximo:</strong> ${formData.buffer} km</li>
             <li><strong>Carga disponible:</strong> ${formData.load} kg</li>
@@ -1047,16 +1076,16 @@ function displayInferenceResults(response, formData) {
         ${routes.length === 0 ? '<p>No se encontraron rutas alternativas.</p>' : routes.map((route, idx) => `
             <div class="route-card">
                 <h5>Ruta ${idx + 1}</h5>
-                <p><strong>Distancia total:</strong> ${route.total_distance?.toFixed(2) || 'N/A'} km</p>
-                <p><strong>Peso total:</strong> ${route.total_weight?.toFixed(2) || 'N/A'} kg</p>
-                <p><strong>Precio estimado:</strong> ${route.total_price?.toFixed(2) || 'N/A'} €</p>
-                <p><strong>Paradas:</strong> ${route.stops?.length || 0}</p>
-                ${route.stops && route.stops.length > 0 ? `
+                <p><strong>Distancia total:</strong> ${route.total_distance_km?.toFixed(1) || 'N/A'} km</p>
+                <p><strong>Peso recogido:</strong> ${route.total_expected_weight_kg?.toFixed(0) || 'N/A'} kg</p>
+                <p><strong>Beneficio estimado:</strong> ${formatEuroCurrency(route.total_expected_revenue_eur || 0)}</p>
+                <p><strong>Paradas:</strong> ${route.waypoints?.length - 2 || 0}</p>
+                ${route.waypoints && route.waypoints.length > 2 ? `
                     <details>
-                        <summary>Ver paradas (${route.stops.length})</summary>
+                        <summary>Ver paradas (${route.waypoints.length - 2})</summary>
                         <ul>
-                            ${route.stops.map(stop => `
-                                <li>${stop.location_name || stop.location_id} - ${stop.weight?.toFixed(2) || 'N/A'} kg</li>
+                            ${route.waypoints.slice(1, -1).map(wp => `
+                                <li>${formatLocationName(wp.location_name)}</li>
                             `).join('')}
                         </ul>
                     </details>
@@ -1080,7 +1109,7 @@ function displayInferenceResults(response, formData) {
         
         if (typeof drawAlternativeRoutes === 'function' && routes.length > 0) {
             console.log('Drawing alternative routes on map...');
-            drawAlternativeRoutes(routes, formData.truck_type);
+            drawAlternativeRoutes(routes, formData.truck_type, candidates);
         }
         
         // Show route legend if we have alternative routes
@@ -1094,10 +1123,30 @@ function displayInferenceResults(response, formData) {
     // Store candidates globally for metric visualization
     currentCandidates = candidates;
     
-    // Show the toggle button (don't auto-open the panel)
+    // Hide Leaflet attribution controls (bottom right)
+    const leafletBottomRight = document.querySelector('.leaflet-bottom.leaflet-right');
+    if (leafletBottomRight) {
+        leafletBottomRight.style.display = 'none';
+    }
+    
+    // Show the toggle button (don't auto-open the panel on desktop)
     const toggleBtn = document.getElementById('toggle-results-btn');
     if (toggleBtn) {
         toggleBtn.style.display = 'flex';
+    }
+    
+    // On mobile, auto-open the results panel
+    const isMobile = window.innerWidth <= 768;
+    if (isMobile) {
+        const resultsPanel = document.getElementById('results-panel');
+        if (resultsPanel) {
+            resultsPanel.classList.add('active');
+        }
+    }
+    
+    // Show all candidates in side panel
+    if (typeof showAllCandidatesPanel === 'function') {
+        showAllCandidatesPanel(candidates, routes, currentOrigin);
     }
     
     // Show candidates and metric buttons in layer control when results are available
@@ -1269,8 +1318,15 @@ async function drawRouteFromAPI(originId, destinationId) {
         console.log('Route drawn:', routeData.summary);
         
     } catch (error) {
-        console.error('Error drawing route:', error);
-        showStatus(`Error al dibujar la ruta: ${error.message}`, 'error', 0);
+        // No route found is not critical - just log as warning
+        console.warn('⚠️ Could not draw preview route (may not exist in road network):', error.message);
+        
+        // Show info message instead of error (route preview is optional)
+        showStatus(
+            'ℹ️ Vista previa de ruta no disponible. Puedes continuar con la optimización.',
+            'info',
+            4000
+        );
         
         // Fallback: just fit map to show both markers
         if (markers[originId] && markers[destinationId]) {
@@ -1311,11 +1367,17 @@ function showRouteLegend(routes) {
         
         const item = document.createElement('div');
         item.className = 'route-legend-item';
+        
+        // Get revenue if available
+        const revenue = route.total_expected_revenue_eur || 0;
+        const revenueText = formatEuroCurrency(revenue);
+        
         item.innerHTML = `
             <div class="route-legend-color" style="background-color: ${color};"></div>
             <div class="route-legend-info">
                 <div class="route-legend-label">Ruta ${idx + 1}</div>
                 <div class="route-legend-stats">${timeText} • ${distanceKm.toFixed(1)} km</div>
+                <div class="route-legend-revenue">+${revenueText}</div>
             </div>
         `;
         
