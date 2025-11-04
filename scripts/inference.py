@@ -88,13 +88,11 @@ def prepare_input_features(
     Returns:
         DataFrame with all required features
     """
-    # Parse date
     if date is None:
         date = datetime.now().strftime("%Y-%m-%d")
     
     date_obj = pd.to_datetime(date)
     
-    # Create base input
     input_data = pd.DataFrame({
         'origin_id': [origin_id],
         'destination_id': [destination_id],
@@ -103,82 +101,12 @@ def prepare_input_features(
         'tipo_mercancia': [tipo_mercancia],
     })
     
-    # Add time features
     input_data['day_of_week'] = date_obj.dayofweek
     input_data['month'] = date_obj.month
-    input_data['day'] = date_obj.day
     input_data['week_of_year'] = date_obj.isocalendar().week
-    input_data['is_weekend'] = int(date_obj.dayofweek >= 5)
     input_data['quarter'] = date_obj.quarter
+    input_data['holiday_flag'] = 0
     
-    # Load historical data from database if requested
-    if use_db:
-        try:
-            from atlas_ml.io import create_database_manager
-            config = Config()
-            db = create_database_manager(config)
-            
-            # Get historical stats for this OD pair
-            from sqlalchemy import text
-            query = text("""
-                SELECT 
-                    AVG(precio) as precio_mean_daily,
-                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY precio) as precio_median_daily,
-                    STDDEV(precio) as precio_std_daily,
-                    AVG(peso) as peso_mean_daily,
-                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY peso) as peso_median_daily,
-                    STDDEV(peso) as peso_std_daily,
-                    AVG(volumen) as volumen_mean_daily,
-                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY volumen) as volumen_median_daily,
-                    STDDEV(volumen) as volumen_std_daily
-                FROM app.sodd_loads_filtered
-                WHERE origin_id = :origin_id
-                  AND destination_id = :destination_id
-                  AND date < :ref_date  -- Use only historical data
-            """)
-            
-            with db.engine.connect() as conn:
-                result = conn.execute(query, {
-                    'origin_id': str(origin_id).zfill(5),  # Convert to string with leading zeros
-                    'destination_id': str(destination_id).zfill(5),
-                    'ref_date': date
-                }).fetchone()
-            
-            if result and result[0] is not None:
-                input_data['precio_mean_daily'] = float(result[0] or 0)
-                input_data['precio_median_daily'] = float(result[1] or 0)
-                input_data['precio_std_daily'] = float(result[2] or 0)
-                input_data['peso_mean_daily'] = float(result[3] or 0)
-                input_data['peso_median_daily'] = float(result[4] or 0)
-                input_data['peso_std_daily'] = float(result[5] or 0)
-                input_data['volumen_mean_daily'] = float(result[6] or 0)
-                input_data['volumen_median_daily'] = float(result[7] or 0)
-                input_data['volumen_std_daily'] = float(result[8] or 0)
-                logger.info(f"Loaded historical stats from database for OD pair {origin_id}→{destination_id}")
-            else:
-                # No historical data - this is acceptable, use zeros
-                logger.warning(f"No historical data found for OD pair {origin_id}→{destination_id}, using zeros")
-                for col in ['precio_mean_daily', 'precio_median_daily', 'precio_std_daily',
-                           'peso_mean_daily', 'peso_median_daily', 'peso_std_daily',
-                           'volumen_mean_daily', 'volumen_median_daily', 'volumen_std_daily']:
-                    input_data[col] = 0.0
-            
-        except Exception as e:
-            # Database errors during inference are CRITICAL - fail fast
-            logger.error(f"CRITICAL: Failed to connect to database for historical stats: {e}")
-            raise RuntimeError(
-                f"Cannot run inference without database access. "
-                f"Historical statistics are required features. Error: {e}"
-            ) from e
-    else:
-        # No database access - CRITICAL
-        logger.error("CRITICAL: Cannot run inference without database (use_db=False)")
-        raise RuntimeError(
-            "Database access is required for inference. "
-            "Historical statistics cannot be computed without database."
-        )
-    
-    # Load geographic features (coordinates and distance)
     if use_db:
         try:
             from atlas_ml.io import create_database_manager
@@ -216,7 +144,30 @@ def prepare_input_features(
                 input_data['destination_lon'] = float(geo_result[4])
                 input_data['destination_lat'] = float(geo_result[5])
                 input_data['od_length_km'] = float(geo_result[6])
-                input_data['log_od_length_km'] = np.log1p(input_data['od_length_km'])
+                
+                # Geographic features (Catalunya-specific)
+                barcelona_lat, barcelona_lon = 41.3851, 2.1734
+                
+                def haversine_distance(lat1, lon1, lat2, lon2):
+                    from math import radians, sin, cos, sqrt, atan2
+                    R = 6371
+                    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+                    dlat = lat2 - lat1
+                    dlon = lon2 - lon1
+                    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+                    c = 2 * atan2(sqrt(a), sqrt(1-a))
+                    return R * c
+                
+                origin_lat = float(geo_result[3])
+                origin_lon = float(geo_result[2])
+                destination_lat = float(geo_result[5])
+                destination_lon = float(geo_result[4])
+                
+                input_data['origin_dist_to_bcn'] = haversine_distance(origin_lat, origin_lon, barcelona_lat, barcelona_lon)
+                input_data['dest_dist_to_bcn'] = haversine_distance(destination_lat, destination_lon, barcelona_lat, barcelona_lon)
+                input_data['origin_is_coastal'] = int((origin_lon > 0.5) and (40.5 < origin_lat < 42.5))
+                input_data['dest_is_coastal'] = int((destination_lon > 0.5) and (40.5 < destination_lat < 42.5))
+                
                 logger.info(f"Loaded geographic data: distance = {input_data['od_length_km'].iloc[0]:.2f} km")
             else:
                 # Missing OD pair is CRITICAL - cannot predict without geographic data
@@ -226,43 +177,22 @@ def prepare_input_features(
                     f"Geographic features (coordinates, distance) are required and cannot be zero."
                 )
         except RuntimeError:
-            # Re-raise our own errors
             raise
         except Exception as e:
-            # Database/connection errors are CRITICAL
-            logger.error(f"CRITICAL: Failed to load geographic data from database: {e}")
-            raise RuntimeError(
-                f"Cannot run inference without database access. "
-                f"Geographic features are required. Error: {e}"
-            ) from e
+            logger.error(f"Failed to load geographic data: {e}")
+            raise RuntimeError(f"Cannot load geographic features: {e}") from e
     else:
-        # No database access - CRITICAL for production inference
-        logger.error("CRITICAL: Cannot run inference without database (use_db=False)")
-        raise RuntimeError(
-            "Database access is required for inference. "
-            "Geographic and historical features cannot be computed without database."
-        )
+        raise RuntimeError("Database access required for inference")
     
-    # Holiday flag (simplified - you could load a holiday calendar)
-    input_data['holiday_flag'] = 0
-    
-    # Encode categorical features
     encoders = bundle.encoders.get('feature_builder_encoders', {})
+    if 'tipo_mercancia' in encoders:
+        encoder = encoders['tipo_mercancia']
+        try:
+            input_data['tipo_mercancia_encoded'] = encoder.transform(input_data['tipo_mercancia'])
+        except ValueError:
+            logger.warning(f"Unknown tipo_mercancia: {input_data['tipo_mercancia'].iloc[0]}")
+            input_data['tipo_mercancia_encoded'] = -1
     
-    for col in ['truck_type', 'tipo_mercancia']:
-        if col in encoders:
-            encoder = encoders[col]
-            try:
-                input_data[f'{col}_encoded'] = encoder.transform(input_data[col])
-            except ValueError as e:
-                # Unknown category - this is acceptable with fallback
-                logger.warning(
-                    f"Unknown value for {col}: '{input_data[col].iloc[0]}'. "
-                    f"Known values: {list(encoder.classes_)}. Using -1 (unknown category)."
-                )
-                input_data[f'{col}_encoded'] = -1
-    
-    logger.info(f"Prepared input with {len(input_data.columns)} features")
     return input_data
 
 
@@ -334,6 +264,8 @@ def run_inference(
         else:
             logger.warning(f"Missing feature: {feat}, using 0.0")
             X[feat] = 0.0
+    
+    X = X[required_features]
     
     # Apply scaling if model has scaler
     if bundle.scaler:

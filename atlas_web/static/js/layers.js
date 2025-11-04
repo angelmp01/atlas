@@ -122,7 +122,7 @@ function getCandidateRouteInfo(candidateId, routes) {
 /**
  * Create unified tooltip content for candidate with all metrics
  * @param {Object} candidate - Candidate data
- * @param {string|null} highlightMetric - Metric to highlight in bold ('probability', 'price', 'weight', 'score', or null for none)
+ * @param {string|null} highlightMetric - Metric to highlight in bold ('trips', 'price', 'weight', 'score', or null for none)
  * @returns {string} HTML tooltip content
  */
 function createCandidateTooltip(candidate, highlightMetric = null) {
@@ -134,7 +134,7 @@ function createCandidateTooltip(candidate, highlightMetric = null) {
     const formattedWeight = Math.round(candidate.p_weight_kg).toLocaleString('de-DE');
     
     // Determine bold style for each metric
-    const probStyle = highlightMetric === 'probability' ? 'font-weight: bold;' : '';
+    const probStyle = highlightMetric === 'trips' ? 'font-weight: bold;' : '';
     const priceStyle = highlightMetric === 'price' ? 'font-weight: bold;' : '';
     const weightStyle = highlightMetric === 'weight' ? 'font-weight: bold;' : '';
     const scoreStyle = highlightMetric === 'score' ? 'font-weight: bold;' : '';
@@ -144,8 +144,8 @@ function createCandidateTooltip(candidate, highlightMetric = null) {
             <strong>${formatLocationName(candidate.location_name)}</strong>${routeBadge}<br>
             <div style="display: flex; gap: 8px; margin-top: 6px; font-size: 11px; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 3px; ${probStyle}">
-                    <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Prob" style="width: 12px; height: 12px; opacity: 0.7;">
-                    <span>${(candidate.p_probability * 100).toFixed(0)}%</span>
+                    <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Viajes" style="width: 12px; height: 12px; opacity: 0.7;">
+                    <span>${candidate.p_trips_daily.toFixed(2)}</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 3px; ${priceStyle}">
                     <img src="https://files.svgcdn.io/hugeicons/money-bag-02.svg" alt="Precio" style="width: 12px; height: 12px; opacity: 0.7;">
@@ -169,7 +169,7 @@ function createCandidateTooltip(candidate, highlightMetric = null) {
 /**
  * Draw candidates with circles scaled by a specific metric
  * @param {Array} candidates - List of candidate locations
- * @param {string} metric - Metric to use for scaling ('probability', 'price', 'weight', 'score')
+ * @param {string} metric - Metric to use for scaling ('trips', 'price', 'weight', 'score')
  * @param {string} layerGroupName - Name of the layer group to use
  * @param {string} color - Fill color for circles
  */
@@ -181,7 +181,7 @@ function drawScaledMetricCandidates(candidates, metric, layerGroupName, color) {
     
     // Get metric values and calculate min/max
     const metricMap = {
-        'probability': 'p_probability',
+        'trips': 'p_trips_daily',
         'price': 'p_price_eur',
         'weight': 'p_weight_kg',
         'score': 'score'
@@ -407,12 +407,12 @@ function drawProbabilityHeatmap(candidates) {
     layerGroups.probabilityHeatmap.clearLayers();
     
     // Find min/max for normalization
-    const probs = candidates.map(c => c.p_probability);
-    const minProb = Math.min(...probs);
-    const maxProb = Math.max(...probs);
+    const trips = candidates.map(c => c.p_trips_daily);
+    const minTrips = Math.min(...trips);
+    const maxTrips = Math.max(...trips);
     
     candidates.forEach(candidate => {
-        const normalized = (candidate.p_probability - minProb) / (maxProb - minProb || 1);
+        const normalized = (candidate.p_trips_daily - minTrips) / (maxTrips - minTrips || 1);
         const radius = 5 + normalized * 20; // 5-25px
         const opacity = 0.3 + normalized * 0.6; // 0.3-0.9
         
@@ -428,7 +428,7 @@ function drawProbabilityHeatmap(candidates) {
         marker.bindTooltip(`
             <div class="tooltip-content">
                 <strong>${formatLocationName(candidate.location_name)}</strong><br>
-                Probabilidad: ${(candidate.p_probability * 100).toFixed(1)}%
+                Viajes diarios esperados: ${candidate.p_trips_daily.toFixed(2)}
             </div>
         `);
         
@@ -917,8 +917,8 @@ function showAllCandidatesPanel(candidates, routes, origin) {
                         </div>
                         <div class="candidate-metrics">
                             <div class="candidate-metric">
-                                <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Probabilidad" style="width: 14px; height: 14px;">
-                                <span>${(candidate.p_probability * 100).toFixed(0)}%</span>
+                                <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Viajes" style="width: 14px; height: 14px;">
+                                <span>${candidate.p_trips_daily.toFixed(2)}</span>
                             </div>
                             <div class="candidate-metric">
                                 <img src="https://files.svgcdn.io/hugeicons/money-bag-02.svg" alt="Precio" style="width: 14px; height: 14px;">
@@ -964,8 +964,8 @@ function showCandidateDetails(candidate) {
             <div class="details-section">
                 <h5>Predicciones</h5>
                 <p>
-                    <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Probabilidad" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 4px;">
-                    <strong>Probabilidad:</strong> ${(candidate.p_probability * 100).toFixed(1)}%
+                    <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Viajes" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 4px;">
+                    <strong>Viajes diarios esperados:</strong> ${candidate.p_trips_daily.toFixed(2)}
                 </p>
                 <p>
                     <img src="https://files.svgcdn.io/hugeicons/money-bag-02.svg" alt="Precio" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 4px;">

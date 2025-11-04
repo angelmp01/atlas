@@ -269,7 +269,7 @@ function updateMetricVisualization() {
     
     const metricType = activeMetricBtn.id.replace('layer-', '');
     const metricMap = {
-        'probability': { key: 'probability', layer: 'probabilityHeatmap', color: '#8B5CF6' },
+        'probability': { key: 'trips', layer: 'probabilityHeatmap', color: '#8B5CF6' },
         'price': { key: 'price', layer: 'priceHeatmap', color: '#F59E0B' },
         'weight': { key: 'weight', layer: 'weightHeatmap', color: '#10B981' },
         'score': { key: 'score', layer: 'scores', color: '#3B82F6' }
@@ -286,8 +286,8 @@ function updateMetricVisualization() {
     layerGroups.weightHeatmap.clearLayers();
     layerGroups.scores.clearLayers();
     
-    // Draw scaled metric circles
-    drawScaledMetricCandidates(currentCandidates, metricType, config.layer, config.color);
+    // Draw scaled metric circles - pass the key, not the metricType
+    drawScaledMetricCandidates(currentCandidates, config.key, config.layer, config.color);
     map.addLayer(layerGroups[config.layer]);
 }
 
@@ -312,7 +312,7 @@ function addLayerControl() {
                 <button class="layer-icon-btn" id="layer-candidates" data-active="false" title="Mostrar/ocultar candidatos evaluados" style="display: none;">
                     <img src="https://files.svgcdn.io/hugeicons/view.svg" alt="View" style="width: 24px; height: 24px;">
                 </button>
-                <button class="layer-icon-btn metric-btn" id="layer-probability" data-active="false" title="Predicción de probabilidad" style="display: none;">
+                <button class="layer-icon-btn metric-btn" id="layer-probability" data-active="false" title="Predicción de viajes diarios" style="display: none;">
                     <img src="https://files.svgcdn.io/hugeicons/package.svg" alt="Package" style="width: 24px; height: 24px;">
                 </button>
                 <button class="layer-icon-btn metric-btn" id="layer-price" data-active="false" title="Predicción de precio" style="display: none;">

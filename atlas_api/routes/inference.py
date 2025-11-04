@@ -73,7 +73,7 @@ class CandidateDebugInfo(BaseModel):
     f_eta: float  # ETA scoring function: 1/(1+ETA_km)
     delta_d_km: float  # Extra distance: d(O,i) + d(i,D) - d(O,D)
     is_feasible: bool  # Whether delta_d <= buffer
-    p_probability: float  # Probability of ≥1 trip (from ML model)
+    p_trips_daily: float  # Expected daily trips (from ML model)
     p_price_eur: float  # Expected price in € (from ML model)
     p_weight_kg: float  # Expected weight in kg (from ML model)
     score: float  # Final score: f_eta × (Pv×X) × (Pp×Y) × (Pw×Z)
@@ -166,16 +166,6 @@ def load_ml_models() -> Dict[str, Any]:
     
     Models are loaded from MODELS_DIR environment variable.
     Models are cached globally to avoid reloading on each request.
-    
-    NOTE: Currently, the inference endpoint uses heuristic predictions instead of
-    the trained ML models due to feature mismatch. The models were trained with
-    features that require database lookups and complex feature engineering
-    (origin_lat, origin_lon, destination_lat, destination_lon, month, quarter,
-    distance_to_bcn, is_coastal, etc.). For real-time inference, we use simplified
-    heuristic predictions based on distance and truck type.
-    
-    TODO: Align feature engineering pipeline between training and inference, or
-    retrain models with simpler feature sets suitable for real-time inference.
     
     Returns:
         Dictionary with 'probability', 'price', 'weight' model bundles
@@ -735,12 +725,18 @@ def predict_ml_features(
         # Prepare feature matrices (fill missing with 0)
         def prepare_features(feature_names):
             X = pd.DataFrame()
+            missing = []
             for feat in feature_names:
                 if feat in input_data.columns:
                     X[feat] = input_data[feat]
                 else:
+                    logger.warning(f"Missing feature: {feat}")
+                    missing.append(feat)
                     X[feat] = 0.0
-            return X
+            if missing:
+                logger.warning(f"Filled {len(missing)} missing features with 0.0: {missing}")
+            # Ensure features are in the correct order
+            return X[feature_names]
         
         X_prob = prepare_features(prob_features)
         X_price = prepare_features(price_features)
@@ -778,15 +774,11 @@ def predict_ml_features(
         
         # Post-process predictions
         
-        # Probability: model predicts daily trip count (possibly log-transformed)
+        # Probability: model predicts daily trip count (log-transformed)
         if probability_bundle.encoders.get('log_transformed', False):
-            n_trips_daily = np.expm1(prob_pred)  # Reverse log transform
+            n_trips_daily = np.expm1(prob_pred)  # Reverse log transform: expm1 is inverse of log1p
         else:
             n_trips_daily = prob_pred
-        
-        # Convert daily trips to probability (simple heuristic)
-        # More trips = higher probability, capped at 1.0
-        probability = min(max(n_trips_daily / 10.0, 0.05), 0.95)
         
         # Price: reverse log transform if applied
         if models['price'].encoders.get('log_transformed', False):
@@ -801,16 +793,16 @@ def predict_ml_features(
             weight_kg = weight_pred
         
         # Ensure non-negative and reasonable values
-        probability = max(0.0, min(1.0, float(probability)))
+        n_trips_daily = max(0.0, float(n_trips_daily))
         price_eur = max(0.0, float(price_eur))
         weight_kg = max(0.0, float(weight_kg))
         
         logger.debug(
             f"ML predictions for {candidate_id}→{destination_id} ({od_distance:.1f}km): "
-            f"P={probability:.3f}, Price={price_eur:.2f}€, Weight={weight_kg:.2f}kg"
+            f"Trips={n_trips_daily:.3f}, Price={price_eur:.2f}€, Weight={weight_kg:.2f}kg"
         )
         
-        return probability, price_eur, weight_kg
+        return n_trips_daily, price_eur, weight_kg
         
     except Exception as e:
         logger.error(f"Error during ML prediction for {candidate_id}→{destination_id}: {e}", exc_info=True)
@@ -888,7 +880,7 @@ def calculate_candidate_score(
         'f_eta': round(f_eta, 4),
         'delta_d_km': round(delta_d, 2),
         'is_feasible': is_feasible,
-        'p_probability': round(p_prob, 4),
+        'p_trips_daily': round(p_prob, 4),
         'p_price_eur': round(p_price, 2),
         'p_weight_kg': round(p_weight, 2),
         'score': round(score, 4),
