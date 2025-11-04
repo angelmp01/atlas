@@ -76,8 +76,9 @@ class CandidateDebugInfo(BaseModel):
     p_trips_daily: float  # Expected daily trips (from ML model)
     p_price_eur: float  # Expected price in € (from ML model)
     p_weight_kg: float  # Expected weight in kg (from ML model)
-    score: float  # Final score: f_eta × (Pv×X) × (Pp×Y) × (Pw×Z)
-    score_per_km: float  # score / delta_d (for ranking)
+    score: float  # Normalized score [0, 1] combining trips, price, weight
+    score_display: float  # Display score [0, 10]
+    score_per_km: float  # score / delta_d (for ranking efficiency)
 
 
 class RouteWaypoint(BaseModel):
@@ -821,7 +822,9 @@ def calculate_candidate_score(
     buffer_km: float
 ) -> Dict[str, Any]:
     """
-    Calculate score and feasibility for a candidate location.
+    Calculate score and feasibility for a candidate location (raw, pre-normalization).
+    
+    Returns raw values - normalization happens in normalize_candidates_scores().
     
     Args:
         candidate: Candidate location dict
@@ -834,7 +837,7 @@ def calculate_candidate_score(
         buffer_km: Buffer in km
         
     Returns:
-        Dictionary with all scoring details
+        Dictionary with raw scoring details
     """
     # Calculate distances
     d_oi = calculate_geodesic_distance(origin, candidate)
@@ -857,20 +860,6 @@ def calculate_candidate_score(
         destination['latitude'], destination['longitude']
     )
     
-    # Score formula: (Pv × f_eta × X) × (Pp × Y) / (Pw × Z)
-    # f_eta multiplies probability: more travel time = more time for loads to appear
-    # Weight divides: higher predicted weight = worse (less capacity remaining)
-    # Weighting factors (configurable constants)
-    X = 10.0  # Probability weight
-    Y = 0.01  # Price weight (€ → scale)
-    Z = 1.0   # Weight weight (kg → scale) - now used as divisor
-    
-    # Correct formula: multiply prob by f_eta, divide by weight
-    score = (p_prob * f_eta * X) * (p_price * Y) / (p_weight * Z if p_weight > 0 else 1.0)
-    
-    # Score per km (for ranking candidates efficiently)
-    score_per_km = score / delta_d if delta_d > 0 else score * 1000
-    
     return {
         'location_id': candidate['id'],
         'location_name': candidate['name'],
@@ -883,9 +872,102 @@ def calculate_candidate_score(
         'p_trips_daily': round(p_prob, 4),
         'p_price_eur': round(p_price, 2),
         'p_weight_kg': round(p_weight, 2),
-        'score': round(score, 4),
-        'score_per_km': round(score_per_km, 4)
+        'score': 0.0,  # Will be calculated in normalize_candidates_scores()
+        'score_display': 0.0,  # Will be calculated in normalize_candidates_scores()
+        'score_per_km': 0.0  # Will be calculated in normalize_candidates_scores()
     }
+
+
+# ============================================================================
+# SCORING NORMALIZATION
+# ============================================================================
+
+def normalize_candidates_scores(
+    candidates: List[Dict[str, Any]],
+    w_trips: float = 1.0,
+    w_price: float = 1.0,
+    w_weight: float = 1.0
+) -> List[Dict[str, Any]]:
+    """
+    Normalize candidate scores using min-max scaling.
+    
+    Formula (additive model without distance penalty - distance is handled in score_per_km):
+    score_normalized = w_trips × norm_trips + w_price × norm_price - w_weight × norm_weight
+    
+    Where normalization is inverted for "bad" metrics:
+    - norm_trips = (trips - min_trips) / (max_trips - min_trips)  [0=bad, 1=good]
+    - norm_price = 1 - (price - min_price) / (max_price - min_price)  [0=good, 1=bad]
+    - norm_weight = 1 - (weight - min_weight) / (max_weight - min_weight)  [0=good, 1=bad]
+    
+    Distance penalty is ONLY applied in score_per_km = score / delta_d (no redundancy).
+    
+    Then scale score to [0, 10] for visualization using min-max normalization.
+    
+    Args:
+        candidates: List of scored candidate dicts
+        w_trips: Weight for trips (default 1.0)
+        w_price: Weight for price (default 1.0)
+        w_weight: Weight for weight (default 1.0)
+        
+    Returns:
+        List of candidates with normalized scores [0, 1] and display scores [0, 10]
+    """
+    if not candidates:
+        return candidates
+    
+    # Calculate min/max for each metric
+    min_trips = min(c['p_trips_daily'] for c in candidates)
+    max_trips = max(c['p_trips_daily'] for c in candidates)
+    
+    min_price = min(c['p_price_eur'] for c in candidates)
+    max_price = max(c['p_price_eur'] for c in candidates)
+    
+    min_weight = min(c['p_weight_kg'] for c in candidates)
+    max_weight = max(c['p_weight_kg'] for c in candidates)
+    
+    min_delta = min(c['delta_d_km'] for c in candidates)
+    max_delta = max(c['delta_d_km'] for c in candidates)
+    
+    # Helper function for safe normalization (handle zero range)
+    def safe_normalize(value, min_val, max_val):
+        if max_val == min_val:
+            return 0.5  # Middle value if all values are same
+        return (value - min_val) / (max_val - min_val)
+    
+    # First pass: normalize and calculate scores
+    for candidate in candidates:
+        # Normalize each metric to [0, 1]
+        norm_trips = safe_normalize(candidate['p_trips_daily'], min_trips, max_trips)
+        norm_price = safe_normalize(candidate['p_price_eur'], min_price, max_price)
+        norm_weight = safe_normalize(candidate['p_weight_kg'], min_weight, max_weight)
+        
+        # Invert "bad" metrics (less is better)
+        norm_weight = 1.0 - norm_weight
+        
+        # Additive formula WITHOUT distance (distance is only in score_per_km)
+        candidate['score'] = round(
+            w_trips * norm_trips + w_price * norm_price - w_weight * norm_weight,
+            4
+        )
+        
+        # Score per km (for ranking efficiency - distance penalty applied here)
+        delta_d = candidate['delta_d_km']
+        candidate['score_per_km'] = round(
+            candidate['score'] / delta_d if delta_d > 0 else candidate['score'] * 1000,
+            4
+        )
+    
+    # Second pass: normalize score_per_km to [0, 1] and scale to [0, 10] for display
+    min_score_per_km = min(c['score_per_km'] for c in candidates)
+    max_score_per_km = max(c['score_per_km'] for c in candidates)
+    
+    for candidate in candidates:
+        # Normalize score_per_km to [0, 1]
+        norm_score_display = safe_normalize(candidate['score_per_km'], min_score_per_km, max_score_per_km)
+        # Scale to [0, 10]
+        candidate['score_display'] = round(norm_score_display * 10.0, 1)
+    
+    return candidates
 
 
 # ============================================================================
@@ -1207,7 +1289,15 @@ async def inference_endpoint(request: InferenceRequest):
                 
                 logger.info(f"Scored {len(candidates_scored)} candidates")
                 
-                # 5. Build routes (greedy knapsack) - connection still open
+                # 5. Normalize scores using min-max scaling and scale to [0, 10]
+                candidates_scored = normalize_candidates_scores(
+                    candidates_scored,
+                    w_trips=1.0,
+                    w_price=1.0,
+                    w_weight=1.0
+                )
+                
+                # 6. Build routes (greedy knapsack) - connection still open
                 routes = build_routes_greedy(
                     candidates_scored,
                     origin,
@@ -1225,7 +1315,7 @@ async def inference_endpoint(request: InferenceRequest):
             )
         
         # ========================================
-        # 6. BUILD RESPONSE
+        # 7. BUILD RESPONSE
         # ========================================
         # Convert candidates_scored to CandidateDebugInfo objects
         candidates_debug_objs = [
