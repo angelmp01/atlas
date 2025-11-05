@@ -589,7 +589,6 @@ function drawETAHeatmap(candidates) {
             <div class="tooltip-content">
                 <strong>${formatLocationName(candidate.location_name)}</strong><br>
                 ETA: ${candidate.eta_km.toFixed(1)} km<br>
-                f_eta: ${candidate.f_eta.toFixed(4)}
             </div>
         `);
         

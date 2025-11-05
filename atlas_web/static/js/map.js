@@ -326,7 +326,7 @@ function addLayerControl() {
                         <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
                     </svg>
                 </button>
-                <button class="layer-icon-btn" id="toggle-results-btn" title="Mostrar/Ocultar resultados" style="display: none;">
+                <button class="layer-icon-btn" id="toggle-results-btn" data-active="false" title="Mostrar/Ocultar resultados" style="display: none;">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" transform="scale(-1, 1)">
                         <rect x="3" y="3" width="18" height="18" rx="2"/>
                         <line x1="9" y1="3" x2="9" y2="21"/>
@@ -1170,7 +1170,13 @@ function displayInferenceResults(response, formData) {
  */
 function toggleResultsPanel() {
     const panel = document.getElementById('results-panel');
+    const toggleBtn = document.getElementById('toggle-results-btn');
+    
     panel.classList.toggle('active');
+    
+    // Update button state to match panel visibility
+    const isActive = panel.classList.contains('active');
+    toggleBtn.setAttribute('data-active', isActive.toString());
 }
 
 /**
@@ -1178,7 +1184,12 @@ function toggleResultsPanel() {
  */
 function closeResultsPanel() {
     const panel = document.getElementById('results-panel');
+    const toggleBtn = document.getElementById('toggle-results-btn');
+    
     panel.classList.remove('active');
+    
+    // Update button state
+    toggleBtn.setAttribute('data-active', 'false');
 }
 
 /**

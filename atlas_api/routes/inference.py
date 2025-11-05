@@ -70,7 +70,6 @@ class CandidateDebugInfo(BaseModel):
     latitude: float
     longitude: float
     eta_km: float  # Distance O→i in km
-    f_eta: float  # ETA scoring function: 1/(1+ETA_km)
     delta_d_km: float  # Extra distance: d(O,i) + d(i,D) - d(O,D)
     is_feasible: bool  # Whether delta_d <= buffer
     p_trips_daily: float  # Expected daily trips (from ML model)
@@ -571,28 +570,6 @@ def calculate_geodesic_distance(loc1: Dict, loc2: Dict) -> float:
 
 
 def calculate_eta_score(eta_km: float) -> float:
-    """
-    Calculate ETA scoring function: f_ETA = ETA_km
-    
-    Linear function: more travel time = more time for loads to appear during the day.
-    This multiplies the daily probability prediction to account for time factor.
-    
-    Interpretation: If the truck travels X km to reach a candidate, there are X km
-    worth of travel time for loads to appear at that location. The probability
-    prediction is scaled proportionally to this travel distance.
-    
-    At origin (0 km): no travel time yet, so 0% of daily probability applies.
-    At destination (km_od): full journey time has passed, so 100% of daily probability applies.
-    
-    Since km_od is constant for all candidates in a route optimization, we can
-    directly use eta_km for ranking (the constant factor doesn't affect order).
-    
-    Args:
-        eta_km: Distance from origin to candidate in km
-        
-    Returns:
-        ETA score (linear with distance)
-    """
     return eta_km
 
 
@@ -844,9 +821,8 @@ def calculate_candidate_score(
     # Feasibility: delta_d must be <= buffer_km
     is_feasible = delta_d <= buffer_km
     
-    # ETA and score function
+    # ETA
     eta_km = d_oi
-    f_eta = calculate_eta_score(eta_km)
     
     # ML predictions
     p_prob, p_price, p_weight = predict_ml_features(
@@ -861,7 +837,6 @@ def calculate_candidate_score(
         'latitude': candidate['latitude'],
         'longitude': candidate['longitude'],
         'eta_km': round(eta_km, 2),
-        'f_eta': round(f_eta, 4),
         'delta_d_km': round(delta_d, 2),
         'is_feasible': is_feasible,
         'p_trips_daily': round(p_prob, 4),
@@ -884,10 +859,10 @@ def normalize_candidates_scores(
     w_weight: float = 1.0
 ) -> List[Dict[str, Any]]:
     """
-    Normalize candidate scores using min-max scaling.
+    Normalize candidate scores using min-max scaling to [0, 10] range.
     
     Formula (additive model without distance penalty - distance is handled in score_per_km):
-    score_normalized = w_trips × norm_trips + w_price × norm_price + w_weight × norm_weight_inverted
+    score_raw = w_trips × norm_trips + w_price × norm_price + w_weight × norm_weight_inverted
     
     Where normalization and inversion:
     - norm_trips = (trips - min_trips) / (max_trips - min_trips)  [0=bad, 1=good]
@@ -896,9 +871,11 @@ def normalize_candidates_scores(
     
     All metrics are ADDITIVE (higher = better) because weight is pre-inverted.
     
-    Distance penalty is ONLY applied in score_per_km = score / delta_d (no redundancy).
+    Distance penalty is ONLY applied in score_per_km = score_raw / delta_d (no redundancy).
     
-    Then scale score to [0, 10] for visualization using min-max normalization.
+    Final step: normalize both score and score_per_km to [0, 10] scale using min-max:
+    - score = (score_raw - min_score_raw) / (max_score_raw - min_score_raw) × 10
+    - score_display = (score_per_km - min_score_per_km) / (max_score_per_km - min_score_per_km) × 10
     
     Args:
         candidates: List of scored candidate dicts
@@ -907,7 +884,7 @@ def normalize_candidates_scores(
         w_weight: Weight for weight (default 1.0)
         
     Returns:
-        List of candidates with normalized scores [0, 1] and display scores [0, 10]
+        List of candidates with normalized scores [0, 10] and display scores [0, 10]
     """
     if not candidates:
         return candidates
@@ -944,7 +921,7 @@ def normalize_candidates_scores(
         
         # Additive formula WITHOUT distance (distance is only in score_per_km)
         # All terms are additive since norm_weight is already inverted
-        candidate['score'] = round(
+        candidate['score_raw'] = round(
             w_trips * norm_trips + w_price * norm_price + w_weight * norm_weight,
             4
         )
@@ -952,19 +929,28 @@ def normalize_candidates_scores(
         # Score per km (for ranking efficiency - distance penalty applied here)
         delta_d = candidate['delta_d_km']
         candidate['score_per_km'] = round(
-            candidate['score'] / delta_d if delta_d > 0 else candidate['score'] * 1000,
+            candidate['score_raw'] / delta_d if delta_d > 0 else candidate['score_raw'] * 1000,
             4
         )
     
-    # Second pass: normalize score_per_km to [0, 1] and scale to [0, 10] for display
+    # Second pass: normalize both score and score_per_km to [0, 10] scale
+    min_score_raw = min(c['score_raw'] for c in candidates)
+    max_score_raw = max(c['score_raw'] for c in candidates)
+    
     min_score_per_km = min(c['score_per_km'] for c in candidates)
     max_score_per_km = max(c['score_per_km'] for c in candidates)
     
     for candidate in candidates:
-        # Normalize score_per_km to [0, 1]
-        norm_score_display = safe_normalize(candidate['score_per_km'], min_score_per_km, max_score_per_km)
-        # Scale to [0, 10]
-        candidate['score_display'] = round(norm_score_display * 10.0, 1)
+        # Normalize score_raw to [0, 10] scale
+        norm_score = safe_normalize(candidate['score_raw'], min_score_raw, max_score_raw)
+        candidate['score'] = round(norm_score * 10.0, 1)
+        
+        # Normalize score_per_km to [0, 10] scale (for display purposes)
+        norm_score_per_km = safe_normalize(candidate['score_per_km'], min_score_per_km, max_score_per_km)
+        candidate['score_display'] = round(norm_score_per_km * 10.0, 1)
+        
+        # Remove the temporary score_raw
+        del candidate['score_raw']
     
     return candidates
 
@@ -1293,9 +1279,9 @@ async def inference_endpoint(request: InferenceRequest):
                 # 5. Normalize scores using min-max scaling and scale to [0, 10]
                 candidates_scored = normalize_candidates_scores(
                     candidates_scored,
-                    w_trips=1.0,
+                    w_trips=1.5,
                     w_price=1.0,
-                    w_weight=1.0
+                    w_weight=2.0
                 )
                 
                 # 6. Build routes (greedy knapsack) - connection still open
