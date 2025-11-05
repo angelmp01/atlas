@@ -892,12 +892,14 @@ def normalize_candidates_scores(
     Normalize candidate scores using min-max scaling.
     
     Formula (additive model without distance penalty - distance is handled in score_per_km):
-    score_normalized = w_trips × norm_trips + w_price × norm_price - w_weight × norm_weight
+    score_normalized = w_trips × norm_trips + w_price × norm_price + w_weight × norm_weight_inverted
     
-    Where normalization is inverted for "bad" metrics:
+    Where normalization and inversion:
     - norm_trips = (trips - min_trips) / (max_trips - min_trips)  [0=bad, 1=good]
-    - norm_price = 1 - (price - min_price) / (max_price - min_price)  [0=good, 1=bad]
-    - norm_weight = 1 - (weight - min_weight) / (max_weight - min_weight)  [0=good, 1=bad]
+    - norm_price = (price - min_price) / (max_price - min_price)  [0=bad, 1=good]
+    - norm_weight_inverted = 1 - (weight - min_weight) / (max_weight - min_weight)  [1=light/good, 0=heavy/bad]
+    
+    All metrics are ADDITIVE (higher = better) because weight is pre-inverted.
     
     Distance penalty is ONLY applied in score_per_km = score / delta_d (no redundancy).
     
@@ -942,11 +944,13 @@ def normalize_candidates_scores(
         norm_weight = safe_normalize(candidate['p_weight_kg'], min_weight, max_weight)
         
         # Invert "bad" metrics (less is better)
+        # After inversion: 1.0 = light load (good), 0.0 = heavy load (bad)
         norm_weight = 1.0 - norm_weight
         
         # Additive formula WITHOUT distance (distance is only in score_per_km)
+        # All terms are additive since norm_weight is already inverted
         candidate['score'] = round(
-            w_trips * norm_trips + w_price * norm_price - w_weight * norm_weight,
+            w_trips * norm_trips + w_price * norm_price + w_weight * norm_weight,
             4
         )
         
