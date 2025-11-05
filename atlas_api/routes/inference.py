@@ -765,14 +765,6 @@ def predict_ml_features(
         price_pred = models['price'].model.predict(X_price)[0]
         weight_pred = models['weight'].model.predict(X_weight)[0]
         
-        # Log raw model predictions for each candidate (fixed width for easy comparison)
-        logger.info(
-            f"Candidate {str(candidate_id):>8} → {str(destination_id):>8} | "
-            f"Prob_raw: {prob_pred:>10.6f} | "
-            f"Price_raw: {price_pred:>10.6f} | "
-            f"Weight_raw: {weight_pred:>10.6f}"
-        )
-        
         # Post-process predictions
         
         # Probability: model predicts daily trip count (log-transformed)
@@ -798,9 +790,12 @@ def predict_ml_features(
         price_eur = max(0.0, float(price_eur))
         weight_kg = max(0.0, float(weight_kg))
         
-        logger.debug(
-            f"ML predictions for {candidate_id}→{destination_id} ({od_distance:.1f}km): "
-            f"Trips={n_trips_daily:.3f}, Price={price_eur:.2f}€, Weight={weight_kg:.2f}kg"
+        # Log final predictions for each candidate (transformed values)
+        logger.info(
+            f"Candidate {str(candidate_id):>8} → {str(destination_id):>8} | "
+            f"Trips: {n_trips_daily:>6.2f} | "
+            f"Price: {price_eur:>7.0f} € | "
+            f"Weight: {weight_kg:>7.0f} kg"
         )
         
         return n_trips_daily, price_eur, weight_kg
@@ -1274,7 +1269,9 @@ async def inference_endpoint(request: InferenceRequest):
                 # 4. Score all candidates
                 candidates_scored = []
                 
-                for candidate in candidates_raw:
+                logger.info(f"Starting to score {len(candidates_raw)} candidates found in corridor")
+                
+                for i, candidate in enumerate(candidates_raw):
                     try:
                         score_info = calculate_candidate_score(
                             candidate,
@@ -1288,10 +1285,10 @@ async def inference_endpoint(request: InferenceRequest):
                         )
                         candidates_scored.append(score_info)
                     except Exception as e:
-                        logger.error(f"Error scoring candidate {candidate['id']}: {e}")
+                        logger.error(f"Error scoring candidate {candidate['id']}: {e}", exc_info=True)
                         # Continue with other candidates
                 
-                logger.info(f"Scored {len(candidates_scored)} candidates")
+                logger.info(f"Scored {len(candidates_scored)} candidates successfully out of {len(candidates_raw)} total")
                 
                 # 5. Normalize scores using min-max scaling and scale to [0, 10]
                 candidates_scored = normalize_candidates_scores(

@@ -13,10 +13,13 @@ from .routes import locations, goods_types, route, inference
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.ERROR,  # Show ERROR and CRITICAL only (and INFO from our specific loggers)
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
+
+# Set our specific loggers to INFO level to see our application logs
+logging.getLogger('atlas_api').setLevel(logging.DEBUG)
 
 logger = logging.getLogger(__name__)
 
