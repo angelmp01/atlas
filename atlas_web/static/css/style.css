@@ -82,41 +82,65 @@ header {
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 }
 
+/* Main Content Layout - 3 Panel System */
 .content {
     display: grid;
-    grid-template-columns: 350px 1fr;
+    grid-template-columns: 350px 1fr 350px;
     gap: 20px;
     flex: 1;
     min-height: 0;
     overflow: hidden;
 }
 
-.content:has(.results-panel.active) {
-    grid-template-columns: 350px 1fr 350px;
-}
-
-.form-section, .map-section, .results-panel {
-    background: var(--card-bg);
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+/* Individual Panels */
+.left-panel, .center-panel, .right-panel {
     display: flex;
     flex-direction: column;
     min-height: 0;
 }
 
+/* Left Panel - Form */
+.left-panel {
+    background: var(--card-bg);
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
 .form-section {
+    padding: 20px;
     overflow-y: auto;
+    flex: 1;
+}
+
+/* Center Panel - Map */
+.center-panel {
+    background: var(--card-bg);
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .map-section {
+    padding: 20px;
     overflow: hidden;
     position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Right Panel - Results */
+.right-panel {
+    background: var(--card-bg);
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .results-panel {
+    padding: 20px;
     overflow-y: auto;
+    flex: 1;
     display: none; /* Hidden by default */
+    flex-direction: column;
 }
 
 .results-panel.active {
@@ -764,7 +788,7 @@ header {
     }
     
     #map {
-        height: 400px;
+        height: 70vh; /* 70% de la altura de la pantalla del dispositivo */
         flex: none;
     }
 }
@@ -1271,39 +1295,151 @@ header {
     margin-top: 2px;
 }
 
-/* Mobile: Results panel always visible, positioned after map */
-@media (max-width: 768px) {
+/* Toggle Results Button */
+.toggle-results-btn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 15px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    transition: all 0.3s ease;
+    z-index: 1000;
+}
+
+.toggle-results-btn:hover {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.toggle-results-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* Toggle button active state */
+.toggle-results-btn[data-active="true"] {
+    background: var(--primary-color);
+    box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
+}
+
+.toggle-results-btn[data-active="true"]:hover {
+    background: var(--primary-hover);
+}
+
+/* Desktop Layout - 2 Panels by default, 3 when results shown */
+@media (min-width: 769px) {
+    /* Default: Hide right panel, use 2-column layout */
     .content {
-        flex-direction: column;
+        grid-template-columns: 350px 1fr;
+    }
+    
+    .right-panel {
+        display: none;
     }
     
     .results-panel {
-        position: static !important;
-        width: 100% !important;
-        height: auto !important;
-        max-height: none !important;
-        transform: none !important;
-        box-shadow: none !important;
-        border-left: none !important;
-        border-top: 2px solid #e0e0e0;
-        order: 3; /* After form and map */
+        display: none;
     }
     
-    .results-panel.active {
-        transform: none !important;
+    /* When results are active: Show 3 panels */
+    .content.has-results {
+        grid-template-columns: 350px 1fr 350px;
     }
     
-    /* Hide toggle button on mobile */
-    #toggle-results-btn {
-        display: none !important;
+    .content.has-results .right-panel {
+        display: flex;
     }
     
-    .map-section {
-        order: 2;
+    .content.has-results .results-panel {
+        display: flex;
+    }
+    
+    /* Show toggle button when results are available */
+    .toggle-results-btn.available {
+        display: flex;
+    }
+}
+
+/* Mobile Layout - Stack panels vertically */
+@media (max-width: 768px) {
+    .content {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .left-panel, .center-panel, .right-panel {
+        width: 100%;
+        flex: none;
+    }
+    
+    /* Form Section */
+    .left-panel {
+        order: 1;
     }
     
     .form-section {
-        order: 1;
+        max-height: none;
+        overflow-y: visible;
+    }
+    
+    /* Map Section */
+    .center-panel {
+        order: 2;
+        min-height: 500px; /* Aumentado de 400px para más espacio del mapa */
+        margin-bottom: 5px; /* Espacio antes del panel de resultados */
+    }
+    
+    .map-section {
+        min-height: 450px; /* Aumentado de 350px para más espacio del mapa */
+    }
+    
+    /* Results Section - Hidden by default */
+    .right-panel {
+        order: 3;
+        display: none;
+        margin-top: 10px; /* Margen entre mapa y resultados */
+    }
+    
+    .right-panel.active {
+        display: flex;
+    }
+    
+    .results-panel {
+        display: flex;
+        max-height: 60vh;
+        min-height: 200px;
+    }
+    
+    .results-panel .results {
+        overflow-y: auto;
+    }
+    
+    /* Hide toggle button on mobile */
+    .toggle-results-btn {
+        display: none !important;
+    }
+    
+    /* Responsive form elements */
+    .radio-cards {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .radio-card {
+        flex: 1;
+        min-width: auto;
     }
 }
 

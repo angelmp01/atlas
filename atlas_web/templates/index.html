@@ -24,9 +24,10 @@
         </header>
 
         <div class="content">
-            <!-- Form Section -->
-            <div class="form-section">
-                <form id="route-form">
+            <!-- Left Panel: Form -->
+            <div class="left-panel">
+                <div class="form-section">
+                    <form id="route-form">
                     <div class="form-group autocomplete-wrapper">
                         <div class="input-with-clear">
                             <input 
@@ -120,11 +121,13 @@
                     <button type="submit" class="btn-calculate" id="optimize-btn" disabled>
                         <img src="/static/img/artificial-intelligence_3489001-white.png" alt="AI" class="ai-icon"> Optimizar Ruta
                     </button>
-                </form>
+                    </form>
+                </div>
             </div>
 
-            <!-- Map Section -->
-            <div class="map-section">
+            <!-- Center Panel: Map -->
+            <div class="center-panel">
+                <div class="map-section">
                 <div id="map"></div>
                 
                 <!-- Route Legend (bottom of map) -->
@@ -133,11 +136,24 @@
                     <div id="route-legend-items" class="route-legend-items">
                         <!-- Items populated by JS -->
                     </div>
+                    </div>
                 </div>
-            </div>
+                
+                <!-- Toggle Results Button -->
+                <button id="toggle-results-btn" class="toggle-results-btn" style="display: none;" title="Mostrar/Ocultar resultados">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7"/>
+                        <rect x="14" y="3" width="7" height="7"/>
+                        <rect x="14" y="14" width="7" height="7"/>
+                        <rect x="3" y="14" width="7" height="7"/>
+                    </svg>
+                    Resultados
+                </button>
+                </div>
             
-            <!-- Results Panel (Right Sidebar) -->
-            <div class="results-panel" id="results-panel">
+            <!-- Right Panel: Results -->
+            <div class="right-panel">
+                <div class="results-panel" id="results-panel">
                 <div class="results-panel-header">
                     <h3 id="results-panel-title">Resultados de Optimización</h3>
                     <button id="close-results-btn" class="close-results-btn" title="Cerrar panel">
@@ -148,8 +164,8 @@
                     </button>
                 </div>
                 <div id="results" class="results"></div>
+                </div>
             </div>
-        </div>
         </div>
     </div>
 

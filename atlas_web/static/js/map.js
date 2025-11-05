@@ -103,6 +103,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (closeBtn) {
         closeBtn.addEventListener('click', closeResultsPanel);
     }
+    
+    // Add window resize listener to handle responsive layout changes
+    window.addEventListener('resize', () => {
+        setTimeout(() => {
+            if (map) {
+                map.invalidateSize();
+            }
+        }, 100);
+    });
 });
 
 /**
@@ -933,6 +942,18 @@ async function handleFormSubmit(event) {
     data.destination = destinationId;
     data.origin_name = originInput.value;
     data.destination_name = destinationInput.value;
+
+    // Scroll automático al mapa en móvil
+    const isMobile = window.innerWidth <= 768;
+    if (isMobile) {
+        const mapSection = document.querySelector('.center-panel');
+        if (mapSection) {
+            mapSection.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'start' 
+            });
+        }
+    }
     
     // Show loading and disable entire form
     showStatus('Optimizando ruta...', 'info');
@@ -1129,18 +1150,35 @@ function displayInferenceResults(response, formData) {
         leafletBottomRight.style.display = 'none';
     }
     
-    // Show the toggle button (don't auto-open the panel on desktop)
+    // Show the toggle button and enable 3-panel layout on desktop
     const toggleBtn = document.getElementById('toggle-results-btn');
+    const content = document.querySelector('.content');
+    const rightPanel = document.querySelector('.right-panel');
+    const isMobile = window.innerWidth <= 768;
+    
     if (toggleBtn) {
-        toggleBtn.style.display = 'flex';
+        toggleBtn.classList.add('available');
+        toggleBtn.style.display = isMobile ? 'none' : 'flex';
     }
     
-    // On mobile, auto-open the results panel
-    const isMobile = window.innerWidth <= 768;
-    if (isMobile) {
+    if (content) {
+        content.classList.add('has-results');
+    }
+    
+    // On mobile, auto-open the results panel by showing the right panel
+    if (isMobile && rightPanel) {
+        rightPanel.classList.add('active');
+    }
+    
+    // On desktop, automatically show the results panel
+    if (!isMobile) {
         const resultsPanel = document.getElementById('results-panel');
         if (resultsPanel) {
             resultsPanel.classList.add('active');
+        }
+        // Activar automáticamente el botón de toggle
+        if (toggleBtn) {
+            toggleBtn.setAttribute('data-active', 'true');
         }
     }
     
@@ -1170,13 +1208,41 @@ function displayInferenceResults(response, formData) {
  */
 function toggleResultsPanel() {
     const panel = document.getElementById('results-panel');
+    const rightPanel = document.querySelector('.right-panel');
     const toggleBtn = document.getElementById('toggle-results-btn');
+    const content = document.querySelector('.content');
+    const isMobile = window.innerWidth <= 768;
     
-    panel.classList.toggle('active');
+    if (isMobile) {
+        // On mobile, toggle the right panel visibility
+        rightPanel.classList.toggle('active');
+    } else {
+        // On desktop, toggle results panel and adjust grid layout
+        const isActive = panel.classList.contains('active');
+        
+        if (isActive) {
+            // Hide results
+            panel.classList.remove('active');
+            content.classList.remove('has-results');
+        } else {
+            // Show results
+            panel.classList.add('active');
+            content.classList.add('has-results');
+        }
+    }
     
-    // Update button state to match panel visibility
-    const isActive = panel.classList.contains('active');
+    // Update button state
+    const isActive = isMobile ? 
+        rightPanel.classList.contains('active') : 
+        panel.classList.contains('active');
     toggleBtn.setAttribute('data-active', isActive.toString());
+    
+    // Redimensionar el mapa después de cambiar el layout
+    setTimeout(() => {
+        if (map) {
+            map.invalidateSize();
+        }
+    }, 300);
 }
 
 /**
@@ -1184,12 +1250,27 @@ function toggleResultsPanel() {
  */
 function closeResultsPanel() {
     const panel = document.getElementById('results-panel');
+    const rightPanel = document.querySelector('.right-panel');
     const toggleBtn = document.getElementById('toggle-results-btn');
+    const content = document.querySelector('.content');
+    const isMobile = window.innerWidth <= 768;
     
-    panel.classList.remove('active');
+    if (isMobile) {
+        rightPanel.classList.remove('active');
+    } else {
+        panel.classList.remove('active');
+        content.classList.remove('has-results');
+    }
     
     // Update button state
     toggleBtn.setAttribute('data-active', 'false');
+    
+    // Redimensionar el mapa después de cambiar el layout
+    setTimeout(() => {
+        if (map) {
+            map.invalidateSize();
+        }
+    }, 300);
 }
 
 /**
