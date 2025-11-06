@@ -1,0 +1,20 @@
+version: "3.8"
+services:
+  postgis:
+    image: pgrouting/pgrouting:17-3.5-main
+    container_name: atlas-postgis
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: gisdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gisdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
