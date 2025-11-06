@@ -698,7 +698,7 @@ function drawAlternativeRoutes(routes, truckType = 'normal', candidates = []) {
             </div>
         `);
         
-        routeLine.on('click', () => showRouteDetails(route, index));
+        // Removed: routeLine.on('click', () => showRouteDetails(route, index));
         
         routeLine.addTo(layerGroups.alternativeRoutes);
         

@@ -1141,7 +1141,7 @@ function displayInferenceResults(response, formData) {
         
         // Show route legend if we have alternative routes
         if (routes.length > 0) {
-            showRouteLegend(routes);
+            showRouteLegend(routes, response.base_trip);
         }
     } catch (error) {
         console.error('Error drawing visualization layers:', error);
@@ -1439,8 +1439,9 @@ async function drawRouteFromAPI(originId, destinationId) {
 /**
  * Show route legend at bottom of map
  * @param {Array} routes - Array of alternative routes
+ * @param {Object} baseTrip - Base trip information for comparison
  */
-function showRouteLegend(routes) {
+function showRouteLegend(routes, baseTrip) {
     const legend = document.getElementById('route-legend');
     const itemsContainer = document.getElementById('route-legend-items');
     
@@ -1449,6 +1450,10 @@ function showRouteLegend(routes) {
     // Route colors (same as in layers.js) - colorblind-friendly
     const colors = ['#0173B2', '#DE8F05', '#CC78BC', '#029E73', '#ECE133'];
     
+    // Get base trip data for comparison
+    const baseDistanceKm = baseTrip?.distance_km || 0;
+    const baseTimeMinutes = baseTrip?.time_minutes || 0;
+    
     // Clear existing items
     itemsContainer.innerHTML = '';
     
@@ -1456,12 +1461,25 @@ function showRouteLegend(routes) {
     routes.forEach((route, idx) => {
         const color = colors[idx % colors.length];
         
-        // Calculate estimated time based on distance (avg 60 km/h)
-        const distanceKm = route.total_distance_km || route.total_distance || 0;
-        const estimatedMinutes = Math.round((distanceKm / 60) * 60);
-        const hours = Math.floor(estimatedMinutes / 60);
-        const minutes = estimatedMinutes % 60;
-        const timeText = hours > 0 ? `${hours}h ${minutes}min` : `${minutes}min`;
+        // Use real time data if available, otherwise calculate estimate
+        const totalTimeMinutes = route.total_time_minutes || Math.round((route.total_distance_km / 60) * 60);
+        const hours = Math.floor(totalTimeMinutes / 60);
+        const minutes = Math.round(totalTimeMinutes % 60);
+        const timeText = hours > 0 ? `${hours} h ${minutes} min` : `${minutes} min`;
+        
+        // Calculate differences from base trip
+        const additionalMinutes = Math.round(totalTimeMinutes - baseTimeMinutes);
+        const additionalKm = (route.total_distance_km || 0) - baseDistanceKm;
+        
+        // Format additional time with proper sign and units (integers only)
+        const additionalTimeText = additionalMinutes > 0 ? 
+            `(+${additionalMinutes} min)` : 
+            additionalMinutes < 0 ? `(${additionalMinutes} min)` : `(0 min)`;
+        
+        // Format additional distance with proper sign and units
+        const additionalKmText = additionalKm > 0 ? 
+            `(+${additionalKm.toFixed(1)} km)` : 
+            additionalKm < 0 ? `(${additionalKm.toFixed(1)} km)` : `(0 km)`;
         
         const item = document.createElement('div');
         item.className = 'route-legend-item';
@@ -1474,8 +1492,8 @@ function showRouteLegend(routes) {
             <div class="route-legend-color" style="background-color: ${color};"></div>
             <div class="route-legend-info">
                 <div class="route-legend-label">Ruta ${idx + 1}</div>
-                <div class="route-legend-stats">${timeText} • ${distanceKm.toFixed(1)} km</div>
-                <div class="route-legend-revenue">+${revenueText}</div>
+                <div class="route-legend-stats">${timeText} · ${additionalTimeText}</div>
+                <div class="route-legend-revenue">${revenueText} · ${additionalKmText}</div>
             </div>
         `;
         

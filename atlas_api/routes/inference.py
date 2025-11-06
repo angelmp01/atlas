@@ -94,6 +94,7 @@ class AlternativeRoute(BaseModel):
     route_id: int
     waypoints: List[RouteWaypoint]
     total_distance_km: float  # Total distance including deviations
+    total_time_minutes: float  # Total time including deviations
     extra_distance_km: float  # Sum of all deltas
     total_score: float  # Sum of scores of all waypoints
     total_expected_weight_kg: float  # Sum of expected weights
@@ -468,6 +469,144 @@ def calculate_base_route(conn, origin_id: str, destination_id: str) -> Dict[str,
         "destination": destination,
         "route_geometry": route_geometry
     }
+
+
+def calculate_route_distance_km(conn, waypoints: List[Dict[str, Any]]) -> float:
+    """
+    Calculate total route distance for a multi-waypoint route using pgRouting.
+    Returns the actual distance in km based on OSM2PO routing data.
+    
+    Args:
+        conn: Database connection
+        waypoints: List of waypoints with latitude, longitude (in sequence order)
+        
+    Returns:
+        Total distance in kilometers
+    """
+    if len(waypoints) < 2:
+        return 0.0
+    
+    # Find nearest vertices for all waypoints using OSM2PO tables
+    vertex_query = text("""
+        SELECT id 
+        FROM app.catalunya_truck_2po_vertex 
+        ORDER BY geom_vertex <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326) 
+        LIMIT 1
+    """)
+    
+    vertices = []
+    for wp in waypoints:
+        vertex_result = conn.execute(vertex_query, {
+            "lon": wp['longitude'],
+            "lat": wp['latitude']
+        }).fetchone()
+        if vertex_result:
+            vertices.append(vertex_result.id)
+    
+    if len(vertices) < 2:
+        return 0.0
+    
+    # Calculate routes between consecutive waypoints and sum the distance
+    total_distance = 0.0
+    
+    for i in range(len(vertices) - 1):
+        origin_vertex = vertices[i]
+        dest_vertex = vertices[i + 1]
+        
+        # Calculate route distance for this segment
+        route_query = text("""
+            WITH route AS (
+                SELECT * FROM pgr_dijkstra(
+                    'SELECT id, source, target, cost, reverse_cost FROM app.catalunya_truck_2po_4pgr',
+                    :origin_vertex,
+                    :dest_vertex,
+                    true
+                )
+            )
+            SELECT SUM(ST_Length(e.geom_way::geography))/1000 AS segment_distance_km
+            FROM route r
+            JOIN app.catalunya_truck_2po_4pgr e ON e.id = r.edge
+            WHERE r.edge <> -1
+        """)
+        
+        result = conn.execute(route_query, {
+            "origin_vertex": origin_vertex,
+            "dest_vertex": dest_vertex
+        }).fetchone()
+        
+        if result and result.segment_distance_km is not None:
+            total_distance += float(result.segment_distance_km)
+    
+    return total_distance
+
+
+def calculate_route_time_minutes(conn, waypoints: List[Dict[str, Any]]) -> float:
+    """
+    Calculate total route time for a multi-waypoint route using pgRouting cost.
+    Returns the actual time in minutes based on OSM2PO routing costs.
+    
+    Args:
+        conn: Database connection
+        waypoints: List of waypoints with latitude, longitude (in sequence order)
+        
+    Returns:
+        Total time in minutes
+    """
+    if len(waypoints) < 2:
+        return 0.0
+    
+    # Find nearest vertices for all waypoints using OSM2PO tables
+    vertex_query = text("""
+        SELECT id 
+        FROM app.catalunya_truck_2po_vertex 
+        ORDER BY geom_vertex <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326) 
+        LIMIT 1
+    """)
+    
+    vertices = []
+    for wp in waypoints:
+        vertex_result = conn.execute(vertex_query, {
+            "lon": wp['longitude'],
+            "lat": wp['latitude']
+        }).fetchone()
+        if vertex_result:
+            vertices.append(vertex_result.id)
+    
+    if len(vertices) < 2:
+        return 0.0
+    
+    # Calculate routes between consecutive waypoints and sum the time
+    total_time = 0.0
+    
+    for i in range(len(vertices) - 1):
+        origin_vertex = vertices[i]
+        dest_vertex = vertices[i + 1]
+        
+        # Calculate route time for this segment
+        route_query = text("""
+            WITH route AS (
+                SELECT * FROM pgr_dijkstra(
+                    'SELECT id, source, target, cost, reverse_cost FROM app.catalunya_truck_2po_4pgr',
+                    :origin_vertex,
+                    :dest_vertex,
+                    true
+                )
+            )
+            SELECT SUM(e.cost)*60.0 AS segment_time_minutes
+            FROM route r
+            JOIN app.catalunya_truck_2po_4pgr e ON e.id = r.edge
+            WHERE r.edge <> -1
+        """)
+        
+        result = conn.execute(route_query, {
+            "origin_vertex": origin_vertex,
+            "dest_vertex": dest_vertex
+        }).fetchone()
+        
+        if result and result.segment_time_minutes is not None:
+            total_time += float(result.segment_time_minutes)
+    
+    return total_time
 
 
 def calculate_route_geometry(conn, waypoints: List[Dict[str, Any]]) -> str:
@@ -1093,16 +1232,9 @@ def build_routes_greedy(
             selected = reorder_waypoints_geographically(selected, origin, destination)
             
             # ⭐ RECALCULATE DISTANCES: After reordering, recalculate the actual route distance
-            # Calculate sequential distance: O → W1 → W2 → ... → Wn → D
+            # Calculate sequential distance using real pgRouting distance: O → W1 → W2 → ... → Wn → D
             waypoint_sequence = [origin] + selected + [destination]
-            actual_route_distance = 0.0
-            
-            for i in range(len(waypoint_sequence) - 1):
-                segment_distance = calculate_geodesic_distance(
-                    waypoint_sequence[i],
-                    waypoint_sequence[i + 1]
-                )
-                actual_route_distance += segment_distance
+            actual_route_distance = calculate_route_distance_km(conn, waypoint_sequence)
             
             # Recalculate delta (extra distance compared to direct route)
             recalculated_delta = actual_route_distance - base_distance_km
@@ -1141,7 +1273,7 @@ def build_routes_greedy(
             # Total distance = base_distance + recalculated extra_distance
             total_distance = base_distance_km + recalculated_delta
             
-            # Calculate route geometry for visualization
+            # Calculate total time using real pgRouting costs (not estimation)
             waypoint_coords = [
                 {
                     "latitude": wp.latitude,
@@ -1149,12 +1281,16 @@ def build_routes_greedy(
                 }
                 for wp in waypoints
             ]
+            total_time = calculate_route_time_minutes(conn, waypoint_coords)
+            
+            # Calculate route geometry for visualization
             route_geometry = calculate_route_geometry(conn, waypoint_coords)
             
             routes.append(AlternativeRoute(
                 route_id=route_idx + 1,
                 waypoints=waypoints,
                 total_distance_km=round(total_distance, 2),
+                total_time_minutes=round(total_time, 2),
                 extra_distance_km=round(recalculated_delta, 2),  # Use recalculated delta
                 total_score=round(total_score, 4),
                 total_expected_weight_kg=round(total_weight, 2),
