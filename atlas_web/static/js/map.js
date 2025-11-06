@@ -967,6 +967,12 @@ async function handleFormSubmit(event) {
     
     button.innerHTML = '<span class="loading"></span> Optimizando...';
     
+    // Remove base route tooltip (if it exists)
+    if (window.routeLine) {
+        window.routeLine.closeTooltip();
+        window.routeLine.unbindTooltip();
+    }
+    
     try {
         // Prepare data for inference API
         const requestData = {
