@@ -59,6 +59,17 @@ async def index(request: Request):
     )
 
 
+@app.get("/about", response_class=HTMLResponse)
+async def about(request: Request):
+    """
+    Render about page with project information.
+    """
+    return templates.TemplateResponse(
+        "about.html",
+        {"request": request}
+    )
+
+
 @app.get("/health")
 async def health():
     """

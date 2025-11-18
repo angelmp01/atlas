@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About ATLAS - Advanced Transportation Logistics Analysis System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/about.css">
+</head>
+<body>
+    <!-- Language Switcher -->
+    <div class="controls-top no-print">
+        <div class="d-flex gap-2 align-items-center">
+            <div class="btn-group" role="group" aria-label="Language switcher">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-2 py-1 lang-btn" data-lang="ca">CA</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm px-2 py-1 lang-btn" data-lang="es">ES</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm px-2 py-1 lang-btn" data-lang="en">EN</button>
+            </div>
+            <button type="button" id="printBtn" class="btn btn-outline-secondary btn-sm">
+                <i class="fas fa-print"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Header with ATLAS Logo -->
+    <header class="header-section">
+        <div class="header-content">
+            <div class="header-top">
+                <img src="/static/img/atlas-banner-flat-transparent.png" alt="ATLAS" class="header-logo">
+            </div>
+            <p class="header-subtitle">Advanced Transportation Logistics Analysis System</p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="content-section">
+        <!-- Article Content with Magazine-style Flow -->
+        <article class="article-content">
+            <img src="/static/img/about-02-initial-landing.png" 
+                 alt="Initial Landing" 
+                 class="imagen-flotante-der">
+
+            <p data-i18n="intro_text">
+                ATLAS es un proyecto desarrollado en el Postgrado en Inteligencia Artificial aplicada al Transporte y la Logística de la UPC. Su objetivo es ayudar a un operador a decidir qué desvíos vale la pena incorporar entre un origen y un destino, maximizando la rentabilidad del trayecto sin comprometer capacidad ni desviar excesivamente la ruta.
+            </p>
+
+            <p data-i18n="hybrid_text">
+                El sistema analiza cientos de posibles paradas cercanas al corredor O→D. Para evaluarlas construimos un motor híbrido basado en tres pilares.
+            </p>
+
+            <p data-i18n="pillar1_text">
+                El primero es un módulo de modelos de Machine Learning que predice viajes diarios, beneficio y peso esperado para cada relación OD.
+            </p>
+
+            <img src="/static/img/about-03-results.png" 
+                 alt="Scoring Results" 
+                 class="imagen-flotante-izq">
+
+            <p data-i18n="pillar2_text">
+                El segundo es un motor de scoring que normaliza y combina estas predicciones en una métrica única que favorece lo rentable y penaliza consumos de capacidad o desvíos altos.
+            </p>
+
+            <p data-i18n="pillar3_text">
+                El tercero es un algoritmo tipo mochila (greedy knapsack) que selecciona la combinación óptima de paradas respetando las restricciones del camión y el buffer.
+            </p>
+
+            <p data-i18n="optimization_text">
+                Una vez elegidas las mejores paradas, ATLAS reordena el itinerario y lo enruta sobre la red de carreteras usando PostGIS + pgRouting, generando varias alternativas reales O→D con geometría, tiempo, distancia y detalle económico.
+            </p>
+
+            <img src="/static/img/about-04-score.png" 
+                 alt="Alternative Routes" 
+                 class="imagen-flotante-der">
+
+            <p data-i18n="transparency_text">
+                Un aspecto clave del proyecto es que todo el flujo es autoexplicativo y visual: cada etapa puede inspeccionarse sobre un mapa o un panel, permitiendo entender qué candidatos se evaluaron, qué score obtiene cada punto y cómo se construyen las rutas finales. Esto convierte ATLAS en una herramienta transparente, interpretable y alineada con escenarios logísticos reales.
+            </p>
+        </article>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer-section">
+        <div class="container">
+            <p><span data-i18n="footer_text">Desarrollado en el Postgrado en IA aplicada al Transporte y la Logística - UPC</span></p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/about.js"></script>
+</body>
+</html>
