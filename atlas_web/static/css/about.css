@@ -211,6 +211,7 @@ header a.header-link:visited {
     text-decoration: none;
     cursor: pointer;
     transition: opacity 0.2s ease;
+    word-break: break-word;
 }
 
 .footer-section a:hover {
